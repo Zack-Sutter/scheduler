@@ -7,6 +7,7 @@ import sys
 import tkinter as tk
 from tkinter import messagebox, ttk
 from tksheet import Sheet
+import re
 
 import numpy as np
 import pandas as pd
@@ -42,6 +43,8 @@ CELL_COLORS = {
     '': '#D3D3D3',
     None: '#D3D3D3'
 }
+
+STANDARD_FLOOR_SHIFTS = ['Trike', 'Gallery', 'Front', 'Back', 'Float', 'ENCA', 'STST']
 
 primary_button_color = "#EDD863"
 primary_button_hover_color = "#E1D591"
@@ -97,29 +100,20 @@ class ScheduleApp(tk.Tk):
 
     def create_radio_buttons(self):
         """Initialize radio buttons."""
+        tk.Label(self, text='Operating hours').pack(anchor='w', pady=5, padx=10)
+        self.operating_hours = tk.Entry(self, width=20)
+        self.operating_hours.insert(0,"10:00 - 5:00")
+        self.operating_hours.pack(anchor='w', pady=5, padx=10)
+
         self.radio0 = tk.IntVar(value=1)
         tk.Label(self, text='Early or late lunches today?').pack(anchor='w', pady=5, padx=10)
         tk.Radiobutton(self, text='Early', variable=self.radio0, value=0).pack(anchor='w', pady=5, padx=10)
         tk.Radiobutton(self, text='Late', variable=self.radio0, value=1).pack(anchor='w', pady=5, padx=10)
 
-        self.radio1 = tk.IntVar()
-        tk.Label(self, text='Will FT/ROOT work tickets?').pack(anchor='w', pady=5, padx=10)
-        tk.Radiobutton(self, text='No', variable=self.radio1, value=0).pack(anchor='w', pady=5, padx=10)
-        tk.Radiobutton(self, text='Yes', variable=self.radio1, value=1).pack(anchor='w', pady=5, padx=10)
-
-        self.radio2 = tk.IntVar(value=1)
-        tk.Label(self, text='Will volunteers work tickets?').pack(anchor='w', pady=5, padx=10)
-        tk.Radiobutton(self, text='No', variable=self.radio2, value=0).pack(anchor='w', pady=5, padx=10)
-        tk.Radiobutton(self, text='Yes', variable=self.radio2, value=1).pack(anchor='w', pady=5, padx=10)
-
-        self.radio4 = tk.IntVar()
-        tk.Label(self, text='Is today a *Thursday* Freeplay?').pack(anchor='w', pady=5, padx=10)
-        tk.Radiobutton(self, text='No', variable=self.radio4, value=0).pack(anchor='w', pady=5, padx=10)
-        tk.Radiobutton(self, text='Yes', variable=self.radio4, value=1).pack(anchor='w', pady=5, padx=10)
 
     def create_action_buttons(self):
         """Initialize main buttons."""
-        create_schedule_button = tk.Button(self, text="Create Schedule", command=self.create_schedule, background=primary_button_color)
+        create_schedule_button = tk.Button(self, text="Create Blank", command=self.create_schedule, background=primary_button_color)
         create_schedule_button.pack(anchor='w', pady=20, padx=10)
         create_schedule_button.bind('<Enter>', lambda e: create_schedule_button.configure(background=primary_button_hover_color))
         create_schedule_button.bind('<Leave>', lambda e: create_schedule_button.configure(background=primary_button_color))
@@ -173,52 +167,59 @@ class ScheduleApp(tk.Tk):
 
     def add_nonstandard_shift(self, selection):
         """Handle adding nonstandard shifts to the dataframe and the display."""
-        self.save_state()
         self.df.loc[selection["time_start"]:selection["time_end"], selection["workers"]] = selection["shift"]
         self.nonstandard_shifts.append(selection)
         self.update_sheet()
 
+    
     def add_standard_shift(self, shift):
         """Handle adding standard shifts to the dataframe and the display."""
+        # Determine workers to use
         if not self.sheet_frame.sheet.get_all_selection_boxes():
             workers = self.paid_workers + self.volunteers
         else:
-            selection = self.sheet_frame.sheet.get_all_selection_boxes()[0] # get first selection only
+            selection = self.sheet_frame.sheet.get_all_selection_boxes()[0]
             workers = self.sheet_frame.sheet.headers()[selection.from_c:selection.upto_c]
-
+        
         failed_time_slots = []
         random.shuffle(workers)
-
-
-        for i in range(len(self.df.index)):
-            curr_row = self.df.index[i]
-            workers_with_nan = set(self.df.columns[self.df.iloc[i].isna()].tolist()) & set(workers)
+        
+        # Assign shifts to workers
+        for curr_row in self.df.index:
+            workers_with_nan = set(self.df.columns[self.df.loc[curr_row].isna()]) & set(workers)
+            
             if workers_with_nan:
-                worker_to_assign = None
-                for worker in workers:
-                    if worker in workers_with_nan:
-                        worker_to_assign = worker
-                        break
+                worker_to_assign = next(w for w in workers if w in workers_with_nan)
                 workers.remove(worker_to_assign)
                 workers.append(worker_to_assign)
                 self.df.at[curr_row, worker_to_assign] = shift
-            if not self.df.loc[curr_row].isin([shift]).any():
+            
+            if shift not in self.df.loc[curr_row].values:
                 failed_time_slots.append(curr_row)
+        
+        # Show warning if any slots failed
         if failed_time_slots and shift:
-            msg = ''
-            for index,slot in enumerate(failed_time_slots):
-                if index > 0: 
-                    msg += ', '
-                msg += slot
-            messagebox.showwarning('Warning', f'Failed to place {shift} at:\n'+ msg)
-
+            msg = ', '.join(failed_time_slots)
+            messagebox.showwarning('Warning', f'Failed to place {shift} at:\n{msg}')
+        
         self.update_sheet()
-     
 
-    def save_state(self):
-        """Called when an action is done that wants to be undo-able."""
-        self.action_history_stack.append(self.df.copy())
-        self.action_redo_stack = []
+    def _perform_with_undo(self, action_func, *args, **kwargs):
+        """Execute an action and only save state if changes were made."""
+        state_before = self.df.copy()
+        
+        # Perform the action
+        result = action_func(*args, **kwargs)
+        
+        # Check if anything changed (old save_state)
+        if not self.df.equals(state_before):
+            self.action_history_stack.append(state_before)
+            self.action_redo_stack = []
+            self.update_labels()
+        else:
+            print("No changes detected. No state saved")
+        
+        return result
  
     def undo(self):
         if self.action_history_stack:
@@ -228,7 +229,8 @@ class ScheduleApp(tk.Tk):
             self.df = last_state
             self.update_sheet()
         else:
-            print("nothing left to undo.")  
+            print("nothing left to undo.") 
+        self.update_labels() 
     
     def redo(self):
         if self.action_redo_stack:
@@ -239,6 +241,15 @@ class ScheduleApp(tk.Tk):
             self.update_sheet()
         else:
             print("nothing left to redo.")
+        self.update_labels()
+    
+    def update_labels(self):
+        undo_len = len(self.action_history_stack)
+        undo_label = f"Undo ({undo_len})"
+        redo_len = len(self.action_redo_stack)
+        redo_label = f"Redo ({redo_len})"
+        self.inputs.undo_button.configure(text=undo_label)
+        self.inputs.redo_button.configure(text=redo_label)
 
     def load_notes(self):
         try:
@@ -264,17 +275,21 @@ class ScheduleApp(tk.Tk):
 
         self.paid_workers = self.paid_workers_entry.get().split(', ')
         self.volunteers = self.volunteers_entry.get().split(', ')
-        grgr = self.radio0.get()
-        w_tickets = self.radio1.get()
-        v_tickets = self.radio2.get()
-        freeplay = self.radio4.get()
+        is_late_lunch = self.radio0.get() # early or late lunch (0 or 1)
 
-        if freeplay:
-            start = 10
-            end = 18
-        else:
-            start = 10
-            end = 17
+        start = 10
+        end = 17
+
+        hours_raw_text = self.operating_hours.get()
+        pattern = r'(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})'
+        match = re.search(pattern, hours_raw_text)
+
+        if match:
+            start = int(match.group(1))
+            end = int(match.group(3)) + 12
+            end_minutes = int(match.group(4))
+            if end_minutes > 0:
+                end += 1
 
         times = pd.to_datetime([datetime.time(h, m).strftime('%H:%M') for h in range(start, end) for m in (0, 30)], format='%H:%M').strftime('%I:%M')
         if self.volunteers[0]: # if no volunteers entered, entrybox still returns empty string. So list = ['']
@@ -282,15 +297,45 @@ class ScheduleApp(tk.Tk):
         else:
             self.df = pd.DataFrame(columns=self.paid_workers, index=times)
 
+        self.fill_lunch(is_late_lunch)
+
         self.sheet_frame = sheetFrame(controller = self)
         self.sheet_frame.pack_propagate(False)
-        if freeplay: # more height to accomidate 5:00 and 5:30 shift.
+
+
+        if end > 17: # more height to accomidate 5:00 and 5:30 shift.
             self.sheet_frame.place(height = 415, width = 975, relx=.992, rely=.0125, anchor='ne')
         else:
             self.sheet_frame.place(height = 365, width = 975, relx=.992, rely=.0125, anchor='ne')
 
         self.inputs = inputFrame(controller = self)
         self.update_sheet()
+    
+    def fill_lunch(self, is_late_lunch):
+        '''
+        Fill the dataframe with lunches upon initialization of a blank sheet.
+        
+        :param self: app controller
+        :param is_late_lunch: 0 if early lunches requested, 1 if late lunches requested
+        '''
+        workers = self.paid_workers
+        if self.volunteers[0]:
+            workers += self.volunteers
+        random.shuffle(workers)
+
+        lunch_times = ["11:00","12:00","01:00"]
+        if is_late_lunch:
+            lunch_times.reverse()
+        
+        print(workers)
+        print(lunch_times)
+        # indexed by hours -- 10:00 through 04:30
+        for worker in workers:
+            pos = self.df.index.get_loc(lunch_times[0])
+            self.df[worker].iloc[pos:pos+2] = 'Lunch'
+            lunch_times.append(lunch_times[0])
+            lunch_times.pop(0)
+        
 
     def open_excel(self): # not implemented yet.
         # try:
@@ -304,10 +349,8 @@ class ScheduleApp(tk.Tk):
         return
 
     def close(self):
-        #destroy_treeview(self)
         self.save_notes()
         self.destroy()
-        #open_file(RES_FILE_NAME)
     
 
 class sheetFrame(tk.Frame):
@@ -422,7 +465,7 @@ class NonStandardShiftFrame(tk.Frame):
             shift = np.nan
         selection['shift'] = shift
 
-        self.controller.add_nonstandard_shift(selection)
+        self.controller._perform_with_undo(self.controller.add_nonstandard_shift, selection)
 
 
 class StandardShiftFrame(tk.Frame):
@@ -438,15 +481,10 @@ class StandardShiftFrame(tk.Frame):
 
         self.listbox = tk.Listbox(self, selectmode='single',width=20)
         self.listbox.grid(row=1, column=0, padx=5, pady=5)
-        self.listbox.insert(tk.END, "Trike")
-        self.listbox.insert(tk.END, "Gallery")
-        self.listbox.insert(tk.END, "Front")
-        self.listbox.insert(tk.END, "Back")
-        self.listbox.insert(tk.END, "STST")
-        self.listbox.insert(tk.END, "ENCA")
-        self.listbox.insert(tk.END, "DIAR")
-        self.listbox.insert(tk.END, "MOT")
-        self.listbox.insert(tk.END, "Float")
+        for shift in STANDARD_FLOOR_SHIFTS:
+            self.listbox.insert(tk.END, shift)
+            self.listbox.itemconfig(tk.END,bg=CELL_COLORS[shift])
+
 
         add_button = tk.Button(self, text="Add Shift", command=self.add_standard_action, background=primary_button_color, height=10)
         add_button.grid(row=1, column=1, padx=5, pady=5)
@@ -456,8 +494,7 @@ class StandardShiftFrame(tk.Frame):
     def add_standard_action(self):
         """Activates when 'Add shift' button is pressed."""
         shift = self.listbox.get(tk.ACTIVE)
-        self.controller.save_state()
-        self.controller.add_standard_shift(shift)
+        self.controller._perform_with_undo(self.controller.add_standard_shift, shift)
 
 
 def show_ui() -> None:
@@ -469,11 +506,17 @@ def show_ui() -> None:
 if __name__ == '__main__':
     show_ui()
     '''
-    Final commit added comments so you can pull what you want out.
 
     Elements unfinished:
-    - logic for lunches, security, tickets.
-    - excel print
-    - Nonstandard_history saving upon pressing "Create Schedule" a second time.
+    - logic for security, tickets.
+    - excel print.
+    - text document paging system. General, then each day of the week.
+
+    Fun adds:
+    - Shift balancer with adjustable priorities.
+    - Project in regular add shift
+    - Separate file for shift and color information.
+    - ability to set colors of shifts with CELL_COLOR values.
+    - copy and paste functionality.
     '''
     #open_file(RES_FILE_NAME)
