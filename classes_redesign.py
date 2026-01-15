@@ -16,35 +16,35 @@ from openpyxl.styles import PatternFill
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.utils import get_column_letter
 
-CELL_COLORS = {
-    'Trike': '#9999FF',
-    'Gallery': '#5eb91e',
-    'Back': '#f4b183',
-    'Front': '#8e86ae',
-    'Float': '#D3D3D3',
-    'ENCA': '#90E4C1',
-    'Head': '#ffd221',
-    'MOT': '#ffd221',
-    'DIAR': '#b50934',
-    'Lunch': '#7d7f7c',
-    'Security': '#00b1d2',
-    'Tickets': '#f6f9d4',
-    'FLOAT': '#D3D3D3',
-    'Badges': '#f6f9d4',
-    'Project': '#f83dda',
-    'GRGR': '#cf6498',
-    'Manager': '#00008B',
-    'STST': '#bf94e4',
-    'MP': '#FFA500',
-    'Museum Project': '3FFA500',
-    'Training': '#FFD580',
-    'Camp': '#c7ea46',
-    'Retail': '#ffccd4',
-    '': '#D3D3D3',
-    None: '#D3D3D3'
+SHIFT_INFO = {
+    'Trike': {'color':'#9999FF','isHour':False},
+    'Gallery': {'color':'#5eb91e','isHour':False},
+    'Back': {'color':'#f4b183','isHour':False},
+    'Front': {'color':'#8e86ae','isHour':False},
+    'Float': {'color':'#D3D3D3','isHour':False},
+    'ENCA': {'color':'#90E4C1','isHour':False},
+    'Head': {'color':'#ffd221','isHour':False},
+    'MOT': {'color':'#ffd221','isHour':False},
+    'DIAR': {'color':'#b50934','isHour':False},
+    'Lunch': {'color':'#7d7f7c','isHour':False},
+    'Security': {'color':'#00b1d2','isHour':True},
+    'Tickets': {'color':'#f6f9d4','isHour':True},
+    'FLOAT': {'color':'#D3D3D3','isHour':False},
+    'Badges': {'color':'#f6f9d4','isHour':True},
+    'Project': {'color':'#f83dda','isHour':False},
+    'GRGR': {'color':'#cf6498','isHour':True},
+    'Manager': {'color':'#00008B','isHour':True},
+    'STST': {'color':'#bf94e4','isHour':False},
+    'MP': {'color':'#FFA500','isHour':False},
+    'Museum Project': {'color':'3FFA500','isHour':True},
+    'Training': {'color':'#FFD580','isHour':True},
+    'Camp': {'color':'#c7ea46','isHour':True},
+    'Retail': {'color':'#ffccd4','isHour':True},
+    '': {'color':'#D3D3D3','isHour':False},
+    None: {'color':'#D3D3D3','isHour':False}
 }
 
-STANDARD_FLOOR_SHIFTS = ['Trike', 'Gallery', 'Front', 'Back', 'Float', 'ENCA', 'STST']
+STANDARD_FLOOR_SHIFTS = ['Security', 'Tickets', 'Trike', 'Gallery', 'Front', 'Back', 'Float', 'ENCA', 'STST', 'Project']
 
 primary_button_color = "#EDD863"
 primary_button_hover_color = "#E1D591"
@@ -87,15 +87,15 @@ class ScheduleApp(tk.Tk):
     def create_worker_inputs(self):
         """Initialize the worker entry boxes."""
         # Paid workers input
-        tk.Label(self, text='Enter the name of FT/ROOT workers sparated by a comma (Ex: Daniel, Lou, Olivia, Sydney)').pack(anchor='w', pady=10, padx=10)
-        self.paid_workers_entry = tk.Entry(self, width=65)
+        tk.Label(self, text='Paid workers (comma separated)').pack(anchor='w', pady=10, padx=10)
+        self.paid_workers_entry = tk.Entry(self, width=60)
         #self.paid_workers_entry.insert(0, get_ft()) # get_ft() not added yet.
         self.paid_workers_entry.insert(0, "placeholder")
         self.paid_workers_entry.pack(anchor='w', pady=5, padx=10)
 
         # Volunteers input
-        tk.Label(self, text='Enter the name of volunteers sparated by a comma (Ex: DKyle, Aliya, Alex)').pack(anchor='w', pady=5, padx=10)
-        self.volunteers_entry = tk.Entry(self, width=65)
+        tk.Label(self, text='Volunteers (comma separated)').pack(anchor='w', pady=5, padx=10)
+        self.volunteers_entry = tk.Entry(self, width=60)
         self.volunteers_entry.pack(anchor='w', pady=5, padx=10)
 
     def create_radio_buttons(self):
@@ -183,8 +183,32 @@ class ScheduleApp(tk.Tk):
         
         failed_time_slots = []
         random.shuffle(workers)
+
+        # if hour shift -> 
+        if SHIFT_INFO[shift]['isHour']:
+            failed_time_slots = self._standard_full_hour_shift(shift, workers)
+
+        # if half-hour shift ->
+        if not SHIFT_INFO[shift]['isHour']:
+            failed_time_slots = self._standard_half_hour_shift(shift, workers)
+    
         
-        # Assign shifts to workers
+        # Show warning if any slots failed
+        if failed_time_slots and shift:
+            msg = ', '.join(failed_time_slots)
+            messagebox.showwarning('Warning', f'Failed to place {shift} at:\n{msg}')
+        
+        self.update_sheet()
+    
+    def _standard_half_hour_shift(self, shift, workers):
+        """
+        Internal function to add 1 copy of shift at each half hour to the given set of workers.
+        
+        :param shift: a string. 
+        :param workers: list of columns in dataframe to add shift to.
+        """
+        failed_time_slots = []
+
         for curr_row in self.df.index:
             workers_with_nan = set(self.df.columns[self.df.loc[curr_row].isna()]) & set(workers)
             
@@ -196,13 +220,35 @@ class ScheduleApp(tk.Tk):
             
             if shift not in self.df.loc[curr_row].values:
                 failed_time_slots.append(curr_row)
+
+        return failed_time_slots
+
+    def _standard_full_hour_shift(self, shift, workers):
+        """
+        Internal function to add 1 copy of shift at each hour to the given set of workers.
         
-        # Show warning if any slots failed
-        if failed_time_slots and shift:
-            msg = ', '.join(failed_time_slots)
-            messagebox.showwarning('Warning', f'Failed to place {shift} at:\n{msg}')
-        
-        self.update_sheet()
+        :param shift: a string.
+        :param workers: list of columns in dataframe to add shift to.
+        """
+        failed_time_slots = []
+
+        for index, row in self.df.iloc[::2].iterrows():
+            pos = self.df.index.get_loc(index)
+            next_index = self.df.index[pos+1]
+            workers_with_nan = set(self.df.columns[self.df.iloc[pos].isna()]) & set(self.df.columns[self.df.iloc[pos+1].isna()]) & set(workers)
+            
+            if workers_with_nan:
+                worker_to_assign = next(w for w in workers if w in workers_with_nan)
+                workers.remove(worker_to_assign)
+                workers.append(worker_to_assign)
+                self.df.at[index, worker_to_assign] = shift
+                self.df.at[next_index, worker_to_assign] = shift
+            
+            if shift not in self.df.loc[index].values:
+                failed_time_slots.append(index)
+
+        return failed_time_slots
+
 
     def _perform_with_undo(self, action_func, *args, **kwargs):
         """Execute an action and only save state if changes were made."""
@@ -402,8 +448,8 @@ class sheetFrame(tk.Frame):
             for col_num, shift in enumerate(row):
                 if pd.isna(shift):
                     self.sheet.highlight_cells(row=row_num, column=col_num, bg=None)
-                elif shift in CELL_COLORS:
-                    self.sheet.highlight_cells(row=row_num, column=col_num, bg=CELL_COLORS[shift])
+                elif shift in SHIFT_INFO:
+                    self.sheet.highlight_cells(row=row_num, column=col_num, bg=SHIFT_INFO[shift]['color'])
                 else:
                     self.sheet.highlight_cells(row=row_num, column=col_num, bg=None)
 
@@ -432,6 +478,9 @@ class inputFrame(tk.Frame):
         self.redo_button.grid(row=0, column=2, columnspan=1, sticky="w", pady=1, padx=1)
         self.redo_button.bind('<Enter>', lambda e: self.redo_button.configure(background=secondary_button_hover_color))
         self.redo_button.bind('<Leave>', lambda e: self.redo_button.configure(background=secondary_button_color))
+
+        self.delete_label = tk.Label(self, text="enter DELETE as a nonstandard shift to clear selection.", width=26, height=1,foreground="#000000")
+        self.delete_label.grid(row=1, column=0, columnspan=2, rowspan=2, sticky="nwes", pady=1, padx=1)
 
 
 
@@ -483,7 +532,7 @@ class StandardShiftFrame(tk.Frame):
         self.listbox.grid(row=1, column=0, padx=5, pady=5)
         for shift in STANDARD_FLOOR_SHIFTS:
             self.listbox.insert(tk.END, shift)
-            self.listbox.itemconfig(tk.END,bg=CELL_COLORS[shift])
+            self.listbox.itemconfig(tk.END,bg=SHIFT_INFO[shift]['color'])
 
 
         add_button = tk.Button(self, text="Add Shift", command=self.add_standard_action, background=primary_button_color, height=10)
@@ -508,13 +557,11 @@ if __name__ == '__main__':
     '''
 
     Elements unfinished:
-    - logic for security, tickets.
     - excel print.
     - text document paging system. General, then each day of the week.
 
     Fun adds:
     - Shift balancer with adjustable priorities.
-    - Project in regular add shift
     - Separate file for shift and color information.
     - ability to set colors of shifts with CELL_COLOR values.
     - copy and paste functionality.
