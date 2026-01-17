@@ -88,14 +88,14 @@ class ScheduleApp(tk.Tk):
         """Initialize the worker entry boxes."""
         # Paid workers input
         tk.Label(self, text='Paid workers (comma separated)').pack(anchor='w', pady=10, padx=10)
-        self.paid_workers_entry = tk.Entry(self, width=60)
+        self.paid_workers_entry = tk.Text(self, width=40, height=3, wrap='word')
         #self.paid_workers_entry.insert(0, get_ft()) # get_ft() not added yet.
-        self.paid_workers_entry.insert(0, "placeholder")
+        #self.paid_workers_entry.insert(0, "placeholder")
         self.paid_workers_entry.pack(anchor='w', pady=5, padx=10)
 
         # Volunteers input
         tk.Label(self, text='Volunteers (comma separated)').pack(anchor='w', pady=5, padx=10)
-        self.volunteers_entry = tk.Entry(self, width=60)
+        self.volunteers_entry = tk.Text(self, width=40, height=3, wrap='word')
         self.volunteers_entry.pack(anchor='w', pady=5, padx=10)
 
     def create_radio_buttons(self):
@@ -319,8 +319,8 @@ class ScheduleApp(tk.Tk):
         if self.sheet_frame: # clear previous UI element if button is clicked more than once.
             self.destroy_frame()
 
-        self.paid_workers = self.paid_workers_entry.get().split(', ')
-        self.volunteers = self.volunteers_entry.get().split(', ')
+        self.paid_workers = self.paid_workers_entry.get("1.0","end-1c").split(', ')
+        self.volunteers = self.volunteers_entry.get("1.0","end-1c").split(', ')
         is_late_lunch = self.radio0.get() # early or late lunch (0 or 1)
 
         start = 10
@@ -381,18 +381,46 @@ class ScheduleApp(tk.Tk):
             self.df[worker].iloc[pos:pos+2] = 'Lunch'
             lunch_times.append(lunch_times[0])
             lunch_times.pop(0)
+    
+    def make_excel_file(self):
+        """Converts dataframe into excel file."""
+
+        self.df.index.name = f'{datetime.date.today().month}/{datetime.date.today().day}'
+
+        with pd.ExcelWriter(RES_FILE_NAME, mode='w') as writer:
+            self.df.to_excel(writer, sheet_name='Sheet1')
+
+        wb = load_workbook(RES_FILE_NAME)
+        ws = wb.active
+
+        for cells_in_row in ws.iter_rows(min_row=2,max_col=len(self.df.columns)+1):  # colors for excel
+            for cell in cells_in_row:
+                cell_color = SHIFT_INFO.get(cell.internal_value)
+                if cell_color:
+                    cell.fill = PatternFill(patternType='solid', fgColor=cell_color['color'][1:])  # might be better to remove # rather than [:1]
+
+        wb.save(RES_FILE_NAME)
+        return
         
 
-    def open_excel(self): # not implemented yet.
-        # try:
-        #     open_file(RES_FILE_NAME)
-        # except FileNotFoundError:
-        #     messagebox.showwarning('Excel Error', 'No schedule created yet, cannot open in Excel.')
-        # except PermissionError:
-        #     messagebox.showwarning('Excel Error', 'Please close the current excel sheet before opening the new one.')
-        # except Exception as e:
-        #     messagebox.showwarning('Excel Error', e)
-        return
+    def open_excel(self):
+        self.make_excel_file()
+        try:
+            self.open_file(RES_FILE_NAME)
+        except FileNotFoundError:
+            messagebox.showwarning('Excel Error', 'No schedule created yet, cannot open in Excel.')
+        except PermissionError:
+            messagebox.showwarning('Excel Error', 'Please close the current excel sheet before opening the new one.')
+        except Exception as e:
+            messagebox.showwarning('Excel Error', e)
+    
+    def open_file(self, filename: str) -> None:
+        """Opens file depending on OS."""
+        if sys.platform == 'win32':
+            os.startfile(filename)
+        else:
+            opener = 'open' if sys.platform == 'darwin' else 'xdg-open'
+            subprocess.call([opener, filename])
 
     def close(self):
         self.save_notes()
@@ -469,18 +497,15 @@ class inputFrame(tk.Frame):
 
         self.undo_button = tk.Button(self, text="Undo", command=self.controller.undo, width=13, height=2, foreground="#FFFFFF") 
         self.undo_button.config(background=secondary_button_color) 
-        self.undo_button.grid(row=0, column=1, columnspan=1, sticky='e', pady=1, padx=1)
+        self.undo_button.grid(row=0, column=1, columnspan=1, sticky='e', pady=(10,0), padx=1)
         self.undo_button.bind('<Enter>', lambda e: self.undo_button.configure(background=secondary_button_hover_color))
         self.undo_button.bind('<Leave>', lambda e: self.undo_button.configure(background=secondary_button_color))
 
         self.redo_button = tk.Button(self, text="Redo", command=self.controller.redo, width=13, height=2, foreground="#FFFFFF")
         self.redo_button.config(background=secondary_button_color)
-        self.redo_button.grid(row=0, column=2, columnspan=1, sticky="w", pady=1, padx=1)
+        self.redo_button.grid(row=0, column=2, columnspan=1, sticky="w", pady=(10,0), padx=1)
         self.redo_button.bind('<Enter>', lambda e: self.redo_button.configure(background=secondary_button_hover_color))
         self.redo_button.bind('<Leave>', lambda e: self.redo_button.configure(background=secondary_button_color))
-
-        self.delete_label = tk.Label(self, text="enter DELETE as a nonstandard shift to clear selection.", width=26, height=1,foreground="#000000")
-        self.delete_label.grid(row=1, column=0, columnspan=2, rowspan=2, sticky="nwes", pady=1, padx=1)
 
 
 
@@ -492,7 +517,7 @@ class NonStandardShiftFrame(tk.Frame):
         self.create_widgets()
 
     def create_widgets(self):
-        label = tk.Label(self, text="Add nonstandard shift")
+        label = tk.Label(self, text=" Add nonstandard shift\n use DELETE to clear selection.",justify='left')
         label.grid(row=0, column=0, columnspan=3, sticky="w", pady=5)
 
         self.entry = tk.Entry(self, width=20)
