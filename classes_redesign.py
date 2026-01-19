@@ -175,14 +175,14 @@ class ScheduleApp(tk.Tk):
     def add_standard_shift(self, shift):
         """Handle adding standard shifts to the dataframe and the display."""
         # Determine workers to use
-        print("DEBUG:: add_standard_shift: workers list BEFORE if else block")
-        print(self.paid_workers, self.volunteers)
+        #print("DEBUG:: add_standard_shift: workers list BEFORE if else block")
+        #print(self.paid_workers, self.volunteers)
         if not self.sheet_frame.sheet.get_all_selection_boxes():
             workers = self.paid_workers + self.volunteers
         else:
             selection = self.sheet_frame.sheet.get_all_selection_boxes()[0]
             workers = self.sheet_frame.sheet.headers()[selection.from_c:selection.upto_c]
-        print("DEBUG:: add_standard_shift: workers list AFTER if else block", workers)
+        #print("DEBUG:: add_standard_shift: workers list AFTER if else block", workers)
         
         failed_time_slots = []
         random.shuffle(workers)
@@ -211,20 +211,22 @@ class ScheduleApp(tk.Tk):
         :param workers: list of columns in dataframe to add shift to.
         """
         failed_time_slots = []
-        print("Assigning shift", shift)
-        print("Initial worker list:", workers)
-        print()
+        # print("Assigning shift", shift)
+        # print("Initial worker list:", workers)
+        # print()
 
         for curr_row in self.df.index:
+            if shift in self.df.loc[curr_row].values:
+                continue
             nan_set = set(self.df.columns[self.df.loc[curr_row].isna()]) & set(workers)
             workers_with_nan = list(filter(lambda x: x in nan_set, workers))
             
             if workers_with_nan:
                 worker_to_assign = next(w for w in workers if w in workers_with_nan)
-                print(curr_row)
-                print("SET:", nan_set, " |")
-                print("LIST:", workers_with_nan, " | SEL:", worker_to_assign)
-                print()
+                # print(curr_row)
+                # print("SET:", nan_set, " |")
+                # print("LIST:", workers_with_nan, " | SEL:", worker_to_assign)
+                # print()
                 workers.remove(worker_to_assign)
                 workers.append(worker_to_assign)
                 self.df.at[curr_row, worker_to_assign] = shift
@@ -232,7 +234,6 @@ class ScheduleApp(tk.Tk):
             if shift not in self.df.loc[curr_row].values:
                 failed_time_slots.append(curr_row)
 
-        print("-------------")
         return failed_time_slots
 
     def _standard_full_hour_shift(self, shift, workers):
@@ -247,17 +248,25 @@ class ScheduleApp(tk.Tk):
         for index, row in self.df.iloc[::2].iterrows():
             pos = self.df.index.get_loc(index)
             next_index = self.df.index[pos+1]
+
+            if shift in self.df.loc[index].values and shift in self.df.loc[next_index].values:
+                continue
+
             workers_with_nan = set(self.df.columns[self.df.iloc[pos].isna()]) & set(self.df.columns[self.df.iloc[pos+1].isna()]) & set(workers)
             
             if workers_with_nan:
                 worker_to_assign = next(w for w in workers if w in workers_with_nan)
                 workers.remove(worker_to_assign)
                 workers.append(worker_to_assign)
-                self.df.at[index, worker_to_assign] = shift
-                self.df.at[next_index, worker_to_assign] = shift
+                if shift not in self.df.loc[index].values:
+                    self.df.at[index, worker_to_assign] = shift
+                if shift not in self.df.loc[next_index].values:
+                    self.df.at[next_index, worker_to_assign] = shift
             
             if shift not in self.df.loc[index].values:
                 failed_time_slots.append(index)
+            if shift not in self.df.loc[index].values:
+                failed_time_slots.append(next_index)
 
         return failed_time_slots
 
@@ -388,7 +397,6 @@ class ScheduleApp(tk.Tk):
 
 
         self.paid_workers = self.paid_workers_entry.get("1.0","end-1c").split(', ')
-        print("DEBUG:: create_schedule. paid workers:", self.paid_workers)
         self.volunteers = self.volunteers_entry.get("1.0","end-1c").split(', ')
         is_late_lunch = self.radio0.get() # early or late lunch (0 or 1)
 
@@ -442,13 +450,11 @@ class ScheduleApp(tk.Tk):
         if is_late_lunch:
             lunch_times.reverse()
         
-        print("DEBUG: fill_lunch")
-        print(workers)
-        print(lunch_times)
         # indexed by hours -- 10:00 through 04:30
         for worker in workers:
             pos = self.df.index.get_loc(lunch_times[0])
-            self.df[worker].iloc[pos:pos+2] = 'Lunch'
+            self.df.at[self.df.index[pos],worker] = 'Lunch'
+            self.df.at[self.df.index[pos+1],worker] = 'Lunch'
             lunch_times.append(lunch_times[0])
             lunch_times.pop(0)
     
