@@ -175,11 +175,14 @@ class ScheduleApp(tk.Tk):
     def add_standard_shift(self, shift):
         """Handle adding standard shifts to the dataframe and the display."""
         # Determine workers to use
+        print("DEBUG:: add_standard_shift: workers list BEFORE if else block")
+        print(self.paid_workers, self.volunteers)
         if not self.sheet_frame.sheet.get_all_selection_boxes():
             workers = self.paid_workers + self.volunteers
         else:
             selection = self.sheet_frame.sheet.get_all_selection_boxes()[0]
             workers = self.sheet_frame.sheet.headers()[selection.from_c:selection.upto_c]
+        print("DEBUG:: add_standard_shift: workers list AFTER if else block", workers)
         
         failed_time_slots = []
         random.shuffle(workers)
@@ -208,12 +211,20 @@ class ScheduleApp(tk.Tk):
         :param workers: list of columns in dataframe to add shift to.
         """
         failed_time_slots = []
+        print("Assigning shift", shift)
+        print("Initial worker list:", workers)
+        print()
 
         for curr_row in self.df.index:
-            workers_with_nan = set(self.df.columns[self.df.loc[curr_row].isna()]) & set(workers)
+            nan_set = set(self.df.columns[self.df.loc[curr_row].isna()]) & set(workers)
+            workers_with_nan = list(filter(lambda x: x in nan_set, workers))
             
             if workers_with_nan:
                 worker_to_assign = next(w for w in workers if w in workers_with_nan)
+                print(curr_row)
+                print("SET:", nan_set, " |")
+                print("LIST:", workers_with_nan, " | SEL:", worker_to_assign)
+                print()
                 workers.remove(worker_to_assign)
                 workers.append(worker_to_assign)
                 self.df.at[curr_row, worker_to_assign] = shift
@@ -221,6 +232,7 @@ class ScheduleApp(tk.Tk):
             if shift not in self.df.loc[curr_row].values:
                 failed_time_slots.append(curr_row)
 
+        print("-------------")
         return failed_time_slots
 
     def _standard_full_hour_shift(self, shift, workers):
@@ -288,6 +300,58 @@ class ScheduleApp(tk.Tk):
         else:
             print("nothing left to redo.")
         self.update_labels()
+
+    def swap(self):
+        """Swaps a pair of selections if they are equal size. Action performed with undo."""
+        # get first and second selections. 
+        if len(self.sheet_frame.sheet.get_all_selection_boxes()) < 2:
+            print("insufficient selections.")
+            return
+        sel1 = self.sheet_frame.sheet.get_all_selection_boxes()[0]
+        sel1_x = sel1[3]-sel1[1]
+        sel1_y = sel1[2]-sel1[0]
+        sel2 = self.sheet_frame.sheet.get_all_selection_boxes()[1]
+        sel2_x = sel2[3]-sel2[1]
+        sel2_y = sel2[2]-sel2[0]
+
+        if sel1_x != sel2_x or sel1_y != sel2_y:
+            print("incorrect size match")
+            return
+        
+        if sel1_x == 1 and sel1_y == 1:
+            sel1_data = [self.sheet_frame.sheet.get_data(*sel1)]
+            sel2_data = [self.sheet_frame.sheet.get_data(*sel2)]
+            print("SIZE 1 SELECTION")
+        else:
+            sel1_data = self.sheet_frame.sheet.get_data(*sel1)
+            sel2_data = self.sheet_frame.sheet.get_data(*sel2)
+        
+        sel1_time_start = self.df.iloc[sel1.from_r].name
+        sel1_time_end = self.df.iloc[sel1.upto_r-1].name
+        sel1_workers = self.sheet_frame.sheet.headers()[sel1.from_c:sel1.upto_c]
+
+        sel2_time_start = self.df.iloc[sel2.from_r].name
+        sel2_time_end = self.df.iloc[sel2.upto_r-1].name
+        sel2_workers = self.sheet_frame.sheet.headers()[sel2.from_c:sel2.upto_c]
+
+        sel1_data_loc = self.df.loc[sel1_time_start:sel1_time_end, sel1_workers]
+        sel2_data_loc = self.df.loc[sel2_time_start:sel2_time_end, sel2_workers]
+
+        sel1_df = pd.DataFrame(sel1_data)
+        sel1_df.index = sel2_data_loc.index
+        sel1_df.columns = sel2_data_loc.columns
+
+        sel2_df = pd.DataFrame(sel2_data)
+        sel2_df.index = sel1_data_loc.index
+        sel2_df.columns = sel1_data_loc.columns
+
+        # assignment.
+        self.df.loc[sel2_time_start:sel2_time_end, sel2_workers] = sel1_df
+        self.df.loc[sel1_time_start:sel1_time_end, sel1_workers] = sel2_df
+
+        # update labels.
+        self.update_sheet()
+        self.update_labels()
     
     def update_labels(self):
         undo_len = len(self.action_history_stack)
@@ -317,9 +381,14 @@ class ScheduleApp(tk.Tk):
 
     def create_schedule(self):
         if self.sheet_frame: # clear previous UI element if button is clicked more than once.
+            self.action_history_stack = []
+            self.action_redo_stack = []
+            self.update_labels()
             self.destroy_frame()
 
+
         self.paid_workers = self.paid_workers_entry.get("1.0","end-1c").split(', ')
+        print("DEBUG:: create_schedule. paid workers:", self.paid_workers)
         self.volunteers = self.volunteers_entry.get("1.0","end-1c").split(', ')
         is_late_lunch = self.radio0.get() # early or late lunch (0 or 1)
 
@@ -366,13 +435,14 @@ class ScheduleApp(tk.Tk):
         '''
         workers = self.paid_workers
         if self.volunteers[0]:
-            workers += self.volunteers
+            workers = self.paid_workers + self.volunteers
         random.shuffle(workers)
 
         lunch_times = ["11:00","12:00","01:00"]
         if is_late_lunch:
             lunch_times.reverse()
         
+        print("DEBUG: fill_lunch")
         print(workers)
         print(lunch_times)
         # indexed by hours -- 10:00 through 04:30
@@ -424,6 +494,7 @@ class ScheduleApp(tk.Tk):
 
     def close(self):
         self.save_notes()
+        #messagebox.showwarning("Quit", "Are you sure you want to quit?")
         self.destroy()
     
 
@@ -443,8 +514,8 @@ class sheetFrame(tk.Frame):
                         empty_horizontal=True,
                         empty_vertical=True
                         )
-        self.sheet.enable_bindings()
-        self.sheet.disable_bindings("column_width_resize", "row_height_resize", "move_columns", "move_rows", "column_height_resize", "row_width_resize")
+        self.sheet.enable_bindings("ctrl_select", "drag_select","single_select","column_select")
+        self.sheet.disable_bindings("column_width_resize", "row_height_resize", "move_columns", "move_rows", "column_height_resize", "row_width_resize", "rc_menu")
         self.sheet.pack(fill="both", expand=True)
         self.sheet.readonly_columns(columns=[i for i, _ in enumerate(output_df.columns)], readonly=True)
 
@@ -492,20 +563,24 @@ class inputFrame(tk.Frame):
     def create_widgets(self):
         self.nonstandardFrame = NonStandardShiftFrame(self,self.controller)
         self.standardFrame = StandardShiftFrame(self,self.controller)
-        self.nonstandardFrame.grid(row=0, column=1, columnspan=2, sticky="ne", pady=0, padx=4)
-        self.standardFrame.grid(row=0,column=0,columnspan=1, sticky="w", pady=0)
+        self.nonstandardFrame.grid(row=0, column=1, columnspan=2, rowspan=2, sticky="ne", pady=0, padx=4)
+        self.standardFrame.grid(row=0,column=0,columnspan=1, rowspan=5, sticky="w", pady=0)
 
         self.undo_button = tk.Button(self, text="Undo", command=self.controller.undo, width=13, height=2, foreground="#FFFFFF") 
         self.undo_button.config(background=secondary_button_color) 
-        self.undo_button.grid(row=0, column=1, columnspan=1, sticky='e', pady=(10,0), padx=1)
+        self.undo_button.grid(row=2, column=1, columnspan=1, sticky='e', pady=(10,0), padx=(0,1))
         self.undo_button.bind('<Enter>', lambda e: self.undo_button.configure(background=secondary_button_hover_color))
         self.undo_button.bind('<Leave>', lambda e: self.undo_button.configure(background=secondary_button_color))
 
         self.redo_button = tk.Button(self, text="Redo", command=self.controller.redo, width=13, height=2, foreground="#FFFFFF")
         self.redo_button.config(background=secondary_button_color)
-        self.redo_button.grid(row=0, column=2, columnspan=1, sticky="w", pady=(10,0), padx=1)
+        self.redo_button.grid(row=2, column=2, columnspan=1, sticky="w", pady=(10,0), padx=(1,0))
         self.redo_button.bind('<Enter>', lambda e: self.redo_button.configure(background=secondary_button_hover_color))
         self.redo_button.bind('<Leave>', lambda e: self.redo_button.configure(background=secondary_button_color))
+
+        self.swap_button = tk.Button(self, text="Swap", command=lambda: self.controller._perform_with_undo(lambda: self.controller.swap()), width=13, height=2, foreground="#FFFFFF")
+        self.swap_button.config(background=secondary_button_color)
+        self.swap_button.grid(row=3, column=1, columnspan=2, sticky="w", pady=(1,0), padx=(5,0))
 
 
 
@@ -582,13 +657,15 @@ if __name__ == '__main__':
     '''
 
     Elements unfinished:
-    - excel print.
     - text document paging system. General, then each day of the week.
+    - for each time slot add a counter for # of nan slots
+    - Quit confirmation popup.
 
     Fun adds:
     - Shift balancer with adjustable priorities.
     - Separate file for shift and color information.
     - ability to set colors of shifts with CELL_COLOR values.
     - copy and paste functionality.
+    - guard to stop multiple of same standard shift per row.
     '''
     #open_file(RES_FILE_NAME)
