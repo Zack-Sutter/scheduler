@@ -16,12 +16,13 @@ from openpyxl.styles import PatternFill
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.utils import get_column_letter
 
+# contains standard information about all shifts.
 SHIFT_INFO = {
     'Trike': {'color':'#9999FF','isHour':False},
     'Gallery': {'color':'#5eb91e','isHour':False},
     'Back': {'color':'#f4b183','isHour':False},
     'Front': {'color':'#8e86ae','isHour':False},
-    'Float': {'color':'#D3D3D3','isHour':False},
+    'Float': {'color':'#ffffff','isHour':False},
     'ENCA': {'color':'#90E4C1','isHour':False},
     'Head': {'color':'#ffd221','isHour':False},
     'MOT': {'color':'#ffd221','isHour':False},
@@ -44,18 +45,18 @@ SHIFT_INFO = {
     None: {'color':'#D3D3D3','isHour':False}
 }
 
+# The selection of shifts that will show up in the listbox for adding Standard Shifts.
 STANDARD_FLOOR_SHIFTS = ['Security', 'Tickets', 'Trike', 'Gallery', 'Front', 'Back', 'Float', 'ENCA', 'STST', 'Project']
 
 primary_button_color = "#EDD863"
 primary_button_hover_color = "#E1D591"
 secondary_button_color = "#6A2E35"
 secondary_button_hover_color = "#78454C"
-#redo_button_color = "#E0ACD5"
-#redo_hover_color = "#E6C7DF"
-#generic_button_color = "#5C6B73"
-#generic_hover_color = "#687278"
+# redo_button_color = "#E0ACD5"
+# redo_hover_color = "#E6C7DF"
+# generic_button_color = "#5C6B73"
+# generic_hover_color = "#687278"
 
-# RES_FILE_NAME = f'{'' if sys.platform == 'win32' else '/tmp/'}momath schedule {datetime.date.today()}.xlsx'
 
 if sys.platform == 'win32':
     RES_FILE_NAME = f'momath_schedule_{datetime.date.today()}.xlsx'
@@ -70,7 +71,7 @@ class ScheduleApp(tk.Tk):
         self.geometry('1500x800')
         self.configure(background='lightblue')
 
-        self.nonstandard_shifts = [] # renamed alr_ns
+        self.nonstandard_shifts = []
         self.action_history_stack = []
         self.action_redo_stack = []
         self.df = pd.DataFrame()
@@ -153,7 +154,6 @@ class ScheduleApp(tk.Tk):
 
     def get_sheet_selection(self) -> dict:
         """Gets the selection of the sheet."""
-
         if not self.sheet_frame.sheet.get_all_selection_boxes():
             print("none selected")
             return
@@ -175,14 +175,11 @@ class ScheduleApp(tk.Tk):
     def add_standard_shift(self, shift):
         """Handle adding standard shifts to the dataframe and the display."""
         # Determine workers to use
-        #print("DEBUG:: add_standard_shift: workers list BEFORE if else block")
-        #print(self.paid_workers, self.volunteers)
         if not self.sheet_frame.sheet.get_all_selection_boxes():
             workers = self.paid_workers + self.volunteers
         else:
             selection = self.sheet_frame.sheet.get_all_selection_boxes()[0]
             workers = self.sheet_frame.sheet.headers()[selection.from_c:selection.upto_c]
-        #print("DEBUG:: add_standard_shift: workers list AFTER if else block", workers)
         
         failed_time_slots = []
         random.shuffle(workers)
@@ -211,22 +208,16 @@ class ScheduleApp(tk.Tk):
         :param workers: list of columns in dataframe to add shift to.
         """
         failed_time_slots = []
-        # print("Assigning shift", shift)
-        # print("Initial worker list:", workers)
-        # print()
 
         for curr_row in self.df.index:
             if shift in self.df.loc[curr_row].values:
+                # only apply a single copy of a given shift per schedule.
                 continue
             nan_set = set(self.df.columns[self.df.loc[curr_row].isna()]) & set(workers)
             workers_with_nan = list(filter(lambda x: x in nan_set, workers))
             
             if workers_with_nan:
                 worker_to_assign = next(w for w in workers if w in workers_with_nan)
-                # print(curr_row)
-                # print("SET:", nan_set, " |")
-                # print("LIST:", workers_with_nan, " | SEL:", worker_to_assign)
-                # print()
                 workers.remove(worker_to_assign)
                 workers.append(worker_to_assign)
                 self.df.at[curr_row, worker_to_assign] = shift
@@ -250,6 +241,7 @@ class ScheduleApp(tk.Tk):
             next_index = self.df.index[pos+1]
 
             if shift in self.df.loc[index].values and shift in self.df.loc[next_index].values:
+                # only apply a single copy of a given shift per schedule.
                 continue
 
             workers_with_nan = set(self.df.columns[self.df.iloc[pos].isna()]) & set(self.df.columns[self.df.iloc[pos+1].isna()]) & set(workers)
@@ -315,6 +307,7 @@ class ScheduleApp(tk.Tk):
         # get first and second selections. 
         if len(self.sheet_frame.sheet.get_all_selection_boxes()) < 2:
             print("insufficient selections.")
+            messagebox.showwarning('Swap Error', 'Please select 2 equal size segments.')
             return
         sel1 = self.sheet_frame.sheet.get_all_selection_boxes()[0]
         sel1_x = sel1[3]-sel1[1]
@@ -325,6 +318,7 @@ class ScheduleApp(tk.Tk):
 
         if sel1_x != sel2_x or sel1_y != sel2_y:
             print("incorrect size match")
+            messagebox.showwarning('Swap Error', 'Incorrect size match.')
             return
         
         if sel1_x == 1 and sel1_y == 1:
@@ -389,7 +383,8 @@ class ScheduleApp(tk.Tk):
             file.write(file_content)
 
     def create_schedule(self):
-        if self.sheet_frame: # clear previous UI element if button is clicked more than once.
+        if self.sheet_frame:
+            # clear previous UI element if button is clicked more than once.
             self.action_history_stack = []
             self.action_redo_stack = []
             self.update_labels()
@@ -403,6 +398,7 @@ class ScheduleApp(tk.Tk):
         start = 10
         end = 17
 
+        # using regex to get integer from input museum operating hours.
         hours_raw_text = self.operating_hours.get()
         pattern = r'(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})'
         match = re.search(pattern, hours_raw_text)
@@ -426,7 +422,7 @@ class ScheduleApp(tk.Tk):
         self.sheet_frame.pack_propagate(False)
 
 
-        if end > 17: # more height to accomidate 5:00 and 5:30 shift.
+        if end > 17: # more height to accomidate longer schedule
             self.sheet_frame.place(height = 415, width = 975, relx=.992, rely=.0125, anchor='ne')
         else:
             self.sheet_frame.place(height = 365, width = 975, relx=.992, rely=.0125, anchor='ne')
@@ -450,7 +446,6 @@ class ScheduleApp(tk.Tk):
         if is_late_lunch:
             lunch_times.reverse()
         
-        # indexed by hours -- 10:00 through 04:30
         for worker in workers:
             pos = self.df.index.get_loc(lunch_times[0])
             self.df.at[self.df.index[pos],worker] = 'Lunch'
@@ -473,7 +468,7 @@ class ScheduleApp(tk.Tk):
             for cell in cells_in_row:
                 cell_color = SHIFT_INFO.get(cell.internal_value)
                 if cell_color:
-                    cell.fill = PatternFill(patternType='solid', fgColor=cell_color['color'][1:])  # might be better to remove # rather than [:1]
+                    cell.fill = PatternFill(patternType='solid', fgColor=cell_color['color'][1:])
 
         wb.save(RES_FILE_NAME)
         return
@@ -522,21 +517,50 @@ class sheetFrame(tk.Frame):
                         )
         self.sheet.enable_bindings("ctrl_select", "drag_select","single_select","column_select")
         self.sheet.disable_bindings("column_width_resize", "row_height_resize", "move_columns", "move_rows", "column_height_resize", "row_width_resize", "rc_menu")
-        self.sheet.pack(fill="both", expand=True)
+        self.sheet.pack(fill="both", side='right',expand=True)
+        # column_list = [60] * (len(output_df.columns)-1)
+        # column_list.append(20)
+        # self.sheet.set_column_widths(column_list)
         self.sheet.readonly_columns(columns=[i for i, _ in enumerate(output_df.columns)], readonly=True)
+
+        # set column width here based on width of sheetFrame. 975 pixels.
+        # total_width = 975
+        # num_cols = len(output_df.columns)
+        # initial_col_width = total_width/num_cols
+        # free_slot_width = initial_col_width*0.25
+        # available_width = total_width - free_slot_width
+        # standard_col_width = available_width/(num_cols-1)
+
+        # col_width_list = [standard_col_width] * (num_cols-1)
+        # col_width_list.append(free_slot_width)
+        # self.sheet.set_column_widths(col_width_list)
 
 
     def update_sheet(self):
         """Update the display sheet with the information in the dataframe."""
+        df = self.controller.df.copy()
+        df['Free Slots'] = df.isnull().sum(axis=1)
+
+        # if self.sheet:
+        #     print("DEBUG:: update_sheet(): column widths")
+        #     print(self.sheet.column_width(column=0  ))
+
         try:
             if not self.sheet:
                 # This method of if else allows the sheet to not flicker upon every update.
+                    # except now it is flickering because of the column width setup.
                 # The fillna('') is only to display the gray cells instead of nan.
-                self.create_sheet(self.controller.df.fillna(""))
+                self.create_sheet(df.fillna(""))
             else:
-                self.sheet.set_sheet_data(data=self.controller.df.fillna("").values.tolist())
+                self.sheet.set_sheet_data(data=df.fillna("").values.tolist())
 
             self.color_format()
+            # column_list = [60] * (len(df.columns)-1)
+            # column_list.append(20)
+            # self.sheet.set_column_widths(column_list)
+        
+            # print("DEBUG:: update_sheet(): column widths")
+            # print(self.sheet.column_width(column=0))
 
         except tk.TclError:
             pass
@@ -549,14 +573,26 @@ class sheetFrame(tk.Frame):
 
     def color_format(self):
         """Apply color formatting to sheet."""
+        self.sheet.dehighlight_all()
+
         for row_num, row in enumerate(self.sheet):
+            last_column = len(row)-1
             for col_num, shift in enumerate(row):
+                if col_num == last_column:
+                    # apply color gradient to the 'free slots' column. Each cell is the number of empty slots in the row.
+                    color_gradient_index = shift
+                    if color_gradient_index > 5:
+                        color_gradient_index = 5
+                    color_gradient = ["#a41900","#db2100","#ff4827","#ff7962","#ffb6a9","#ffdbd4"]
+                    self.sheet.highlight_cells(row=row_num, column=col_num, bg=color_gradient[color_gradient_index], redraw=False)
+                    continue
                 if pd.isna(shift):
-                    self.sheet.highlight_cells(row=row_num, column=col_num, bg=None)
+                    self.sheet.highlight_cells(row=row_num, column=col_num, bg=None, redraw=False)
                 elif shift in SHIFT_INFO:
-                    self.sheet.highlight_cells(row=row_num, column=col_num, bg=SHIFT_INFO[shift]['color'])
+                    self.sheet.highlight_cells(row=row_num, column=col_num, bg=SHIFT_INFO[shift]['color'], redraw=False)
                 else:
-                    self.sheet.highlight_cells(row=row_num, column=col_num, bg=None)
+                    self.sheet.highlight_cells(row=row_num, column=col_num, bg=None, redraw=False)
+        self.sheet.refresh()
 
 class inputFrame(tk.Frame):
     def __init__(self, controller: ScheduleApp):
@@ -664,14 +700,13 @@ if __name__ == '__main__':
 
     Elements unfinished:
     - text document paging system. General, then each day of the week.
-    - for each time slot add a counter for # of nan slots
     - Quit confirmation popup.
+    - column width for sheetFrame. Add a dynamic width when sheet is created.
 
     Fun adds:
     - Shift balancer with adjustable priorities.
     - Separate file for shift and color information.
     - ability to set colors of shifts with CELL_COLOR values.
     - copy and paste functionality.
-    - guard to stop multiple of same standard shift per row.
     '''
     #open_file(RES_FILE_NAME)
