@@ -329,6 +329,9 @@ class ScheduleApp(tk.Tk):
             sel1_data = self.sheet_frame.sheet.get_data(*sel1)
             sel2_data = self.sheet_frame.sheet.get_data(*sel2)
         
+        sel1_data = [np.nan if x == '' else x for x in sel1_data]
+        sel2_data = [np.nan if x == '' else x for x in sel2_data]
+        
         sel1_time_start = self.df.iloc[sel1.from_r].name
         sel1_time_end = self.df.iloc[sel1.upto_r-1].name
         sel1_workers = self.sheet_frame.sheet.headers()[sel1.from_c:sel1.upto_c]
@@ -539,7 +542,7 @@ class sheetFrame(tk.Frame):
     def update_sheet(self):
         """Update the display sheet with the information in the dataframe."""
         df = self.controller.df.copy()
-        df['Free Slots'] = df.isnull().sum(axis=1)
+        #df['Free Slots'] = df.isnull().sum(axis=1)
 
         # if self.sheet:
         #     print("DEBUG:: update_sheet(): column widths")
@@ -576,16 +579,16 @@ class sheetFrame(tk.Frame):
         self.sheet.dehighlight_all()
 
         for row_num, row in enumerate(self.sheet):
-            last_column = len(row)-1
+            #last_column = len(row)-1
             for col_num, shift in enumerate(row):
-                if col_num == last_column:
-                    # apply color gradient to the 'free slots' column. Each cell is the number of empty slots in the row.
-                    color_gradient_index = shift
-                    if color_gradient_index > 5:
-                        color_gradient_index = 5
-                    color_gradient = ["#a41900","#db2100","#ff4827","#ff7962","#ffb6a9","#ffdbd4"]
-                    self.sheet.highlight_cells(row=row_num, column=col_num, bg=color_gradient[color_gradient_index], redraw=False)
-                    continue
+                #if col_num == last_column:
+                    # # apply color gradient to the 'free slots' column. Each cell is the number of empty slots in the row.
+                    # color_gradient_index = shift
+                    # if color_gradient_index > 5:
+                    #     color_gradient_index = 5
+                    # color_gradient = ["#a41900","#db2100","#ff4827","#ff7962","#ffb6a9","#ffdbd4"]
+                    # self.sheet.highlight_cells(row=row_num, column=col_num, bg=color_gradient[color_gradient_index], redraw=False)
+                    # continue
                 if pd.isna(shift):
                     self.sheet.highlight_cells(row=row_num, column=col_num, bg=None, redraw=False)
                 elif shift in SHIFT_INFO:
