@@ -114,20 +114,14 @@ class ScheduleApp(tk.Tk):
 
     def create_action_buttons(self):
         """Initialize main buttons."""
-        create_schedule_button = tk.Button(self, text="Create Blank", command=self.create_schedule, background=primary_button_color)
+        create_schedule_button = tk.Button(self, text="Create Blank", command=self.create_schedule)
         create_schedule_button.pack(anchor='w', pady=20, padx=10)
-        create_schedule_button.bind('<Enter>', lambda e: create_schedule_button.configure(background=primary_button_hover_color))
-        create_schedule_button.bind('<Leave>', lambda e: create_schedule_button.configure(background=primary_button_color))
 
-        open_schedule_button = tk.Button(self, text='Open Schedule in Excel', command=self.open_excel, height=2, width=20, background=primary_button_color)
+        open_schedule_button = tk.Button(self, text='Open Schedule in Excel', command=self.open_excel, height=2, width=20)
         open_schedule_button.place(relx=0.993, rely=0.89, anchor='e')
-        open_schedule_button.bind('<Enter>', lambda e: open_schedule_button.configure(background=primary_button_hover_color))
-        open_schedule_button.bind('<Leave>', lambda e: open_schedule_button.configure(background=primary_button_color))
 
-        close_button = tk.Button(self, text='Close MAS', command=self.close, height=2, width=10, background=primary_button_color)
+        close_button = tk.Button(self, text='Close MAS', command=self.close, height=2, width=10)
         close_button.place(relx=0.993, rely=0.95, anchor='e')
-        close_button.bind('<Enter>', lambda e: close_button.configure(background=primary_button_hover_color))
-        close_button.bind('<Leave>', lambda e: close_button.configure(background=primary_button_color))
 
     def create_notes_box(self):
         """Initialize Notes textbox."""
@@ -611,20 +605,20 @@ class inputFrame(tk.Frame):
         self.nonstandardFrame.grid(row=0, column=1, columnspan=2, rowspan=2, sticky="ne", pady=0, padx=4)
         self.standardFrame.grid(row=0,column=0,columnspan=1, rowspan=5, sticky="w", pady=0)
 
-        self.undo_button = tk.Button(self, text="Undo", command=self.controller.undo, width=13, height=2, foreground="#FFFFFF") 
-        self.undo_button.config(background=secondary_button_color) 
+        self.undo_button = tk.Button(self, text="Undo", command=self.controller.undo, width=13, height=2, foreground="#000000") 
+        #self.undo_button.config(background=secondary_button_color) 
         self.undo_button.grid(row=2, column=1, columnspan=1, sticky='e', pady=(10,0), padx=(0,1))
-        self.undo_button.bind('<Enter>', lambda e: self.undo_button.configure(background=secondary_button_hover_color))
-        self.undo_button.bind('<Leave>', lambda e: self.undo_button.configure(background=secondary_button_color))
+        # self.undo_button.bind('<Enter>', lambda e: self.undo_button.configure(background=secondary_button_hover_color))
+        # self.undo_button.bind('<Leave>', lambda e: self.undo_button.configure(background=secondary_button_color))
 
-        self.redo_button = tk.Button(self, text="Redo", command=self.controller.redo, width=13, height=2, foreground="#FFFFFF")
-        self.redo_button.config(background=secondary_button_color)
+        self.redo_button = tk.Button(self, text="Redo", command=self.controller.redo, width=13, height=2, foreground="#000000")
+        #self.redo_button.config(background=secondary_button_color)
         self.redo_button.grid(row=2, column=2, columnspan=1, sticky="w", pady=(10,0), padx=(1,0))
-        self.redo_button.bind('<Enter>', lambda e: self.redo_button.configure(background=secondary_button_hover_color))
-        self.redo_button.bind('<Leave>', lambda e: self.redo_button.configure(background=secondary_button_color))
+        # self.redo_button.bind('<Enter>', lambda e: self.redo_button.configure(background=secondary_button_hover_color))
+        # self.redo_button.bind('<Leave>', lambda e: self.redo_button.configure(background=secondary_button_color))
 
-        self.swap_button = tk.Button(self, text="Swap", command=lambda: self.controller._perform_with_undo(lambda: self.controller.swap()), width=13, height=2, foreground="#FFFFFF")
-        self.swap_button.config(background=secondary_button_color)
+        self.swap_button = tk.Button(self, text="Swap", command=lambda: self.controller._perform_with_undo(lambda: self.controller.swap()), width=13, height=2, foreground="#000000")
+        #self.swap_button.config(background=secondary_button_color)
         self.swap_button.grid(row=3, column=1, columnspan=2, sticky="w", pady=(1,0), padx=(5,0))
 
 
@@ -643,10 +637,8 @@ class NonStandardShiftFrame(tk.Frame):
         self.entry = tk.Entry(self, width=20)
         self.entry.grid(row=1, column=0, padx=5, pady=5)
 
-        add_button = tk.Button(self, text="Add Shift", command=self.add_shift_action, background=primary_button_color)
+        add_button = tk.Button(self, text="Add Shift", command=self.add_shift_action)
         add_button.grid(row=1, column=1, padx=5, pady=5)
-        add_button.bind('<Enter>', lambda e: add_button.configure(background=primary_button_hover_color))
-        add_button.bind('<Leave>', lambda e: add_button.configure(background=primary_button_color))
 
 
     def add_shift_action(self):
@@ -680,10 +672,8 @@ class StandardShiftFrame(tk.Frame):
             self.listbox.itemconfig(tk.END,bg=SHIFT_INFO[shift]['color'])
 
 
-        add_button = tk.Button(self, text="Add Shift", command=self.add_standard_action, background=primary_button_color, height=10)
+        add_button = tk.Button(self, text="Add Shift", command=self.add_standard_action, height=10)
         add_button.grid(row=1, column=1, padx=5, pady=5)
-        add_button.bind('<Enter>', lambda e: add_button.configure(background=primary_button_hover_color))
-        add_button.bind('<Leave>', lambda e: add_button.configure(background=primary_button_color))
 
     def add_standard_action(self):
         """Activates when 'Add shift' button is pressed."""
