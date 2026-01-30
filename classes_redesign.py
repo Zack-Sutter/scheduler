@@ -491,9 +491,9 @@ class ScheduleApp(tk.Tk):
             subprocess.call([opener, filename])
 
     def close(self):
-        self.save_notes()
-        #messagebox.showwarning("Quit", "Are you sure you want to quit?")
-        self.destroy()
+        if messagebox.askyesno("Quit", "Are you sure you want to quit?"):
+            self.save_notes()
+            self.destroy()
     
 
 class sheetFrame(tk.Frame):
@@ -693,7 +693,6 @@ if __name__ == '__main__':
 
     Elements unfinished:
     - text document paging system. General, then each day of the week.
-    - Quit confirmation popup.
     - column width for sheetFrame. Add a dynamic width when sheet is created.
 
     Fun adds:
