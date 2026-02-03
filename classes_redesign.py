@@ -111,6 +111,11 @@ class ScheduleApp(tk.Tk):
         tk.Radiobutton(self, text='Early', variable=self.radio0, value=0).pack(anchor='w', pady=5, padx=10)
         tk.Radiobutton(self, text='Late', variable=self.radio0, value=1).pack(anchor='w', pady=5, padx=10)
 
+        self.radio1 = tk.IntVar(value=1)
+        tk.Label(self, text='Hour Lunches?').pack(anchor='w', pady=5, padx=10)
+        tk.Radiobutton(self, text='Yes', variable=self.radio1, value=1).pack(anchor='w', pady=5, padx=10)
+        tk.Radiobutton(self, text='No', variable=self.radio1, value=0).pack(anchor='w', pady=5, padx=10)
+
 
     def create_action_buttons(self):
         """Initialize main buttons."""
@@ -391,6 +396,7 @@ class ScheduleApp(tk.Tk):
         self.paid_workers = self.paid_workers_entry.get("1.0","end-1c").split(', ')
         self.volunteers = self.volunteers_entry.get("1.0","end-1c").split(', ')
         is_late_lunch = self.radio0.get() # early or late lunch (0 or 1)
+        is_hour_lunch = self.radio1.get() 
 
         start = 10
         end = 17
@@ -413,7 +419,7 @@ class ScheduleApp(tk.Tk):
         else:
             self.df = pd.DataFrame(columns=self.paid_workers, index=times)
 
-        self.fill_lunch(is_late_lunch)
+        self.fill_lunch(is_late_lunch, is_hour_lunch)
 
         self.sheet_frame = sheetFrame(controller = self)
         self.sheet_frame.pack_propagate(False)
@@ -427,28 +433,42 @@ class ScheduleApp(tk.Tk):
         self.inputs = inputFrame(controller = self)
         self.update_sheet()
     
-    def fill_lunch(self, is_late_lunch):
+    def fill_lunch(self, is_late_lunch, is_hour_lunch):
         '''
         Fill the dataframe with lunches upon initialization of a blank sheet.
         
         :param self: app controller
-        :param is_late_lunch: 0 if early lunches requested, 1 if late lunches requested
+        :param is_late_lunch: True if late lunches requested, False if early lunches requested
+        :param is_hour_lunch: True for 1-hour lunch blocks, False for 30-minute lunch blocks
         '''
-        workers = self.paid_workers
-        if self.volunteers[0]:
-            workers = self.paid_workers + self.volunteers
+        # Define all 30-minute lunch time slots
+        lunch_times = ["11:00", "11:30", "12:00", "12:30", "01:00", "01:30"]
+        
+        # Get all workers (paid + volunteers if applicable)
+        workers = self.paid_workers + self.volunteers if self.volunteers[0] else self.paid_workers
         random.shuffle(workers)
-
-        lunch_times = ["11:00","12:00","01:00"]
+        
+        # Reverse order for late lunches
         if is_late_lunch:
             lunch_times.reverse()
         
+        # Assign lunches to workers
+        first_half_hour = True
         for worker in workers:
             pos = self.df.index.get_loc(lunch_times[0])
-            self.df.at[self.df.index[pos],worker] = 'Lunch'
-            self.df.at[self.df.index[pos+1],worker] = 'Lunch'
-            lunch_times.append(lunch_times[0])
-            lunch_times.pop(0)
+            
+            if is_hour_lunch:
+                # Assign 1-hour lunch (two consecutive 30-min blocks)
+                self.df.at[self.df.index[pos], worker] = 'Lunch'
+                self.df.at[self.df.index[pos + 1], worker] = 'Lunch'
+                # Rotate lunch times twice to move to next hour slot
+                lunch_times.append(lunch_times.pop(0))
+                lunch_times.append(lunch_times.pop(0))
+            else:
+                # Assign 30-minute lunch (alternating first/second half)
+                self.df.at[self.df.index[pos], worker] = 'Lunch'
+                # Rotate lunch times once
+                lunch_times.append(lunch_times.pop(0))
     
     def make_excel_file(self):
         """Converts dataframe into excel file."""
