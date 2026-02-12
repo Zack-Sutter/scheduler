@@ -20,10 +20,10 @@ from openpyxl.utils import get_column_letter
 SHIFT_INFO = {
     'Trike': {'color':'#9999FF','isHour':False},
     'Gallery': {'color':'#5eb91e','isHour':False},
-    'Back': {'color':'#f4b183','isHour':False},
-    'Front': {'color':'#8e86ae','isHour':False},
+    'Back': {'color':'#E1EC24','isHour':False},
+    'Front': {'color':'#9BC2E6','isHour':False},
     'Float': {'color':'#ffffff','isHour':False},
-    'ENCA': {'color':'#90E4C1','isHour':False},
+    'ENCA': {'color':'#FFD966','isHour':False},
     'Head': {'color':'#ffd221','isHour':False},
     'MOT': {'color':'#ffd221','isHour':False},
     'DIAR': {'color':'#b50934','isHour':False},
@@ -34,19 +34,23 @@ SHIFT_INFO = {
     'Badges': {'color':'#f6f9d4','isHour':True},
     'Project': {'color':'#f83dda','isHour':False},
     'GRGR': {'color':'#cf6498','isHour':True},
-    'Manager': {'color':'#00008B','isHour':True},
+    'Manager': {'color':'#ACB9CA','isHour':True},
     'STST': {'color':'#bf94e4','isHour':False},
     'MP': {'color':'#FFA500','isHour':False},
     'Museum Project': {'color':'3FFA500','isHour':True},
     'Training': {'color':'#FFD580','isHour':True},
     'Camp': {'color':'#c7ea46','isHour':True},
     'Retail': {'color':'#ffccd4','isHour':True},
+    'Float 0': {'color':'#ffffff','isHour':False},
+    'Float 1': {'color':'#90E4C1','isHour':False},
+    'CORO': {'color':'#f4b183','isHour':False},
+    'Pizza': {'color':'#ffffff','isHour':True},
     '': {'color':'#D3D3D3','isHour':False},
     None: {'color':'#D3D3D3','isHour':False}
 }
 
 # The selection of shifts that will show up in the listbox for adding Standard Shifts.
-STANDARD_FLOOR_SHIFTS = ['Security', 'Tickets', 'Trike', 'Gallery', 'Front', 'Back', 'Float', 'ENCA', 'STST', 'Project']
+STANDARD_FLOOR_SHIFTS = ['Security', 'Trike', 'CORO', 'Gallery', 'Front', 'Back', 'Float 0', 'Float 1', 'ENCA', 'Project']
 
 primary_button_color = "#EDD863"
 primary_button_hover_color = "#E1D591"
