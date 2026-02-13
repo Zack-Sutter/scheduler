@@ -446,7 +446,7 @@ class ScheduleApp(tk.Tk):
         :param is_hour_lunch: True for 1-hour lunch blocks, False for 30-minute lunch blocks
         '''
         # Define all 30-minute lunch time slots
-        lunch_times = ["11:00", "11:30", "12:00", "12:30", "01:00", "01:30"]
+        possible_lunch_times = ["11:00", "11:30", "12:00", "12:30", "01:00", "01:30"]
         
         # Get all workers (paid + volunteers if applicable)
         workers = self.paid_workers + self.volunteers if self.volunteers[0] else self.paid_workers
@@ -454,11 +454,14 @@ class ScheduleApp(tk.Tk):
         
         # Reverse order for late lunches
         if is_late_lunch:
-            lunch_times.reverse()
+            possible_lunch_times = ["01:00", "01:30", "12:00", "12:30", "11:00", "11:30"]
+            #lunch_times.reverse()
+        
+        lunch_times = [time for time in possible_lunch_times if time in self.df.index]
         
         # Assign lunches to workers
-        first_half_hour = True
         for worker in workers:
+
             pos = self.df.index.get_loc(lunch_times[0])
             
             if is_hour_lunch:
