@@ -35,6 +35,7 @@ SHIFT_INFO = {
     'Project': {'color':'#f83dda','isHour':False},
     'GRGR': {'color':'#cf6498','isHour':True},
     'Manager': {'color':'#ACB9CA','isHour':True},
+    'Securager': {'color':'#00b1d2','isHour':True},
     'STST': {'color':'#bf94e4','isHour':False},
     'MP': {'color':'#FFA500','isHour':False},
     'Museum Project': {'color':'3FFA500','isHour':True},
@@ -44,13 +45,13 @@ SHIFT_INFO = {
     'Float 0': {'color':'#ffffff','isHour':False},
     'Float 1': {'color':'#90E4C1','isHour':False},
     'CORO': {'color':'#f4b183','isHour':False},
-    'Pizza': {'color':'#ffffff','isHour':True},
+    'Pizza': {'color':"#f73939",'isHour':True},
     '': {'color':'#D3D3D3','isHour':False},
     None: {'color':'#D3D3D3','isHour':False}
 }
 
 # The selection of shifts that will show up in the listbox for adding Standard Shifts.
-STANDARD_FLOOR_SHIFTS = ['Security', 'Trike', 'CORO', 'Gallery', 'Front', 'Back', 'Float 0', 'Float 1', 'ENCA', 'Project']
+STANDARD_FLOOR_SHIFTS = ['Security', 'Trike', 'CORO', 'Gallery', 'Front', 'Back', 'Float 0', 'Float 1', 'ENCA']
 
 primary_button_color = "#EDD863"
 primary_button_hover_color = "#E1D591"
@@ -179,6 +180,7 @@ class ScheduleApp(tk.Tk):
         """Handle adding standard shifts to the dataframe and the display."""
         # Determine workers to use
         if not self.sheet_frame.sheet.get_all_selection_boxes():
+            selection = None
             workers = self.paid_workers + self.volunteers
         else:
             selection = self.sheet_frame.sheet.get_all_selection_boxes()[0]
@@ -187,13 +189,25 @@ class ScheduleApp(tk.Tk):
         failed_time_slots = []
         random.shuffle(workers)
 
+        ###
+        # add in a section to only do the rows selected.
+        if selection == None:
+            start = 0
+            end = len(self.df)
+        else:
+            start = selection[0]
+            end = selection[2]
+        # add check to get the hours selection.
+        # Be careful about hour selection
+        ###
+
         # if hour shift -> 
         if SHIFT_INFO[shift]['isHour']:
-            failed_time_slots = self._standard_full_hour_shift(shift, workers)
+            failed_time_slots = self._standard_full_hour_shift(shift, workers, start, end)
 
         # if half-hour shift ->
         if not SHIFT_INFO[shift]['isHour']:
-            failed_time_slots = self._standard_half_hour_shift(shift, workers)
+            failed_time_slots = self._standard_half_hour_shift(shift, workers, start, end)
     
         
         # Show warning if any slots failed
@@ -203,7 +217,7 @@ class ScheduleApp(tk.Tk):
         
         self.update_sheet()
     
-    def _standard_half_hour_shift(self, shift, workers):
+    def _standard_half_hour_shift(self, shift, workers, start, end):
         """
         Internal function to add 1 copy of shift at each half hour to the given set of workers.
         
@@ -212,7 +226,7 @@ class ScheduleApp(tk.Tk):
         """
         failed_time_slots = []
 
-        for curr_row in self.df.index:
+        for curr_row in self.df.index[start:end]:
             if shift in self.df.loc[curr_row].values:
                 # only apply a single copy of a given shift per schedule.
                 continue
@@ -230,7 +244,7 @@ class ScheduleApp(tk.Tk):
 
         return failed_time_slots
 
-    def _standard_full_hour_shift(self, shift, workers):
+    def _standard_full_hour_shift(self, shift, workers, start, end):
         """
         Internal function to add 1 copy of shift at each hour to the given set of workers.
         
@@ -239,7 +253,7 @@ class ScheduleApp(tk.Tk):
         """
         failed_time_slots = []
 
-        for index, row in self.df.iloc[::2].iterrows():
+        for index, row in self.df.iloc[start:end:2].iterrows():
             pos = self.df.index.get_loc(index)
             next_index = self.df.index[pos+1]
 
@@ -327,7 +341,6 @@ class ScheduleApp(tk.Tk):
         if sel1_x == 1 and sel1_y == 1:
             sel1_data = [self.sheet_frame.sheet.get_data(*sel1)]
             sel2_data = [self.sheet_frame.sheet.get_data(*sel2)]
-            print("SIZE 1 SELECTION")
         else:
             sel1_data = self.sheet_frame.sheet.get_data(*sel1)
             sel2_data = self.sheet_frame.sheet.get_data(*sel2)
@@ -361,6 +374,40 @@ class ScheduleApp(tk.Tk):
         # update labels.
         self.update_sheet()
         self.update_labels()
+
+    def auto_balance_shifts(self):
+        """
+        Things that are problems:
+        repeated shifts, Trike CORO pairs, cycles
+        """
+        print("\n\n")
+        print("DEBUG:: auto_balance_shifts()")
+
+        for person in self.df.columns:
+            print("person:", person)
+            next_df = self.df[person].shift(-1)
+
+            for shift,next_shift in zip(self.df[person],next_df):
+                if shift not in STANDARD_FLOOR_SHIFTS or shift == 'Security':
+                    continue
+
+                if shift == next_shift:
+                    print('shift copy!', shift)
+                    # mark as problem
+                    # Scan horizontally for a possible swap
+                
+                match shift:
+                    case 'Trike':
+                        if next_shift == 'CORO':
+                            print("Trike --> CORO nono")
+                    case 'CORO':
+                        if next_shift == 'Trike':
+                            print("CORO --> trike nono")
+                print("shifts:", shift, next_shift)
+
+        
+        print("-------------")
+        print("\n\n")
     
     def update_labels(self):
         undo_len = len(self.action_history_stack)
@@ -472,6 +519,9 @@ class ScheduleApp(tk.Tk):
                 lunch_times.append(lunch_times.pop(0))
                 lunch_times.append(lunch_times.pop(0))
             else:
+                if lunch_times[0] == '11:00':
+                    lunch_times.pop(0)
+                    pos = self.df.index.get_loc(lunch_times[0])
                 # Assign 30-minute lunch (alternating first/second half)
                 self.df.at[self.df.index[pos], worker] = 'Lunch'
                 # Rotate lunch times once
@@ -647,6 +697,9 @@ class inputFrame(tk.Frame):
         self.swap_button = tk.Button(self, text="Swap", command=lambda: self.controller._perform_with_undo(lambda: self.controller.swap()), width=13, height=2, foreground="#000000")
         #self.swap_button.config(background=secondary_button_color)
         self.swap_button.grid(row=3, column=1, columnspan=2, sticky="w", pady=(1,0), padx=(5,0))
+
+        #self.balance_button = tk.Button(self, text="Balance", command=lambda: self.controller._perform_with_undo(lambda:self.controller.auto_balance_shifts()), width=13, height=2, foreground="#000000")
+        #self.balance_button.grid(row=3, column=2, columnspan=2, sticky="w", pady=(1,0), padx=(1,5))
 
 
 
