@@ -52,6 +52,7 @@ SHIFT_INFO = {
 
 # The selection of shifts that will show up in the listbox for adding Standard Shifts.
 STANDARD_FLOOR_SHIFTS = ['Security', 'Trike', 'CORO', 'Gallery', 'Front', 'Back', 'Float 0', 'Float 1', 'ENCA']
+SWAPPABLE_FLOOR_SHIFTS = ['Trike', 'CORO', 'Gallery', 'Front', 'Back', 'Float 0', 'Float 1', 'ENCA']
 
 primary_button_color = "#EDD863"
 primary_button_hover_color = "#E1D591"
@@ -67,6 +68,151 @@ if sys.platform == 'win32':
     RES_FILE_NAME = f'momath_schedule_{datetime.date.today()}.xlsx'
 else:
     RES_FILE_NAME = f'/tmp/momath_schedule_{datetime.date.today()}.xlsx'
+
+
+# ---------------------------------------------------------------------------
+# Auto-balance rules (each rule is an object; toggle .enabled in auto_balance_shifts)
+# ---------------------------------------------------------------------------
+
+BEFORE_1PM_CUTOFF = '01:00'
+
+
+class ShiftBalanceRule:
+    """One schedulable constraint for auto_balance_shifts."""
+
+    name = 'base'
+
+    def __init__(self, enabled=True):
+        self.enabled = enabled
+
+    def count(self, col_series):
+        if not self.enabled:
+            return 0
+        return self._count(col_series)
+
+    def _count(self, col_series):
+        raise NotImplementedError
+
+
+class NoDuplicateConsecutiveRule(ShiftBalanceRule):
+    """No duplicate consecutive swappable floor shifts in a column."""
+
+    name = 'no_duplicate_consecutive'
+
+    def _count(self, col_series):
+        values = col_series.tolist()
+        violations = 0
+        for i in range(len(values) - 1):
+            val, next_val = values[i], values[i + 1]
+            if val in SWAPPABLE_FLOOR_SHIFTS and val == next_val:
+                violations += 1
+        return violations
+
+
+class NoTrikeCoroAdjacencyRule(ShiftBalanceRule):
+    """Trike and CORO must not appear in adjacent rows (either order)."""
+
+    name = 'no_trike_coro_adjacency'
+
+    def _count(self, col_series):
+        values = col_series.tolist()
+        violations = 0
+        for i in range(len(values) - 1):
+            val, next_val = values[i], values[i + 1]
+            if {val, next_val} == {'Trike', 'CORO'}:
+                violations += 1
+        return violations
+
+
+class MaxOneTrikeCoroBefore1pmRule(ShiftBalanceRule):
+    """At most one Trike or CORO in rows before 1 PM ('01:00')."""
+
+    name = 'max_one_trike_coro_before_1pm'
+
+    def _count(self, col_series):
+        index = col_series.index.tolist()
+        try:
+            cutoff_pos = index.index(BEFORE_1PM_CUTOFF)
+        except ValueError:
+            cutoff_pos = len(index)
+
+        trike_coro_before_1pm = sum(
+            1 for i, val in enumerate(col_series.tolist())
+            if i < cutoff_pos and val in ('Trike', 'CORO')
+        )
+        if trike_coro_before_1pm > 1:
+            return trike_coro_before_1pm - 1
+        return 0
+
+
+class NoTrikeAdjacentLunchRule(ShiftBalanceRule):
+    """Trike must not be directly adjacent to Lunch (either order)."""
+
+    name = 'no_trike_adjacent_lunch'
+
+    def _count(self, col_series):
+        values = col_series.tolist()
+        violations = 0
+        for i in range(len(values) - 1):
+            if {values[i], values[i + 1]} == {'Trike', 'Lunch'}:
+                violations += 1
+        return violations
+
+
+def default_balance_rules():
+    """Rules in priority order (index 0 = highest priority)."""
+    return [
+        NoDuplicateConsecutiveRule(),
+        NoTrikeCoroAdjacencyRule(),
+        MaxOneTrikeCoroBefore1pmRule(),
+        NoTrikeAdjacentLunchRule(),
+    ]
+
+
+def set_balance_rule_enabled(rules, name, enabled):
+    """Enable or disable a rule by its .name (see rule classes above)."""
+    for rule in rules:
+        if rule.name == name:
+            rule.enabled = enabled
+            return
+    raise ValueError(f'Unknown balance rule: {name!r}')
+
+
+def count_column_violations(col_series, rules):
+    """
+    Count violations per rule. Returns a priority tuple; tuple comparison
+    enforces rule order (fewer high-priority violations always wins).
+    """
+    return tuple(rule.count(col_series) for rule in rules)
+
+
+def total_violations(df, rules):
+    totals = [0] * len(rules)
+    for col in df.columns:
+        for bucket, count in enumerate(count_column_violations(df[col], rules)):
+            totals[bucket] += count
+    return tuple(totals)
+
+
+def introduces_no_new_violations(df, row_label, col_name, new_value, rules):
+    """
+    Per-column helper: simulate placing `new_value` into df.at[row_label, col_name].
+    Returns True if the column priority tuple does not get worse.
+
+    Not used as a swap gate in auto_balance_shifts; swaps are accepted only when
+    total_violations improves schedule-wide (lexicographic rule order).
+    df is not modified.
+    """
+    current_score = count_column_violations(df[col_name], rules)
+
+    df_copy = df.copy()
+    df_copy.at[row_label, col_name] = new_value
+    new_score = count_column_violations(df_copy[col_name], rules)
+
+    return new_score <= current_score
+
+
+# ---------------------------------------------------------------------------
 
 
 class ScheduleApp(tk.Tk):
@@ -377,38 +523,87 @@ class ScheduleApp(tk.Tk):
 
     def auto_balance_shifts(self):
         """
-        Things that are problems:
-        repeated shifts, Trike CORO pairs, cycles
+        Iteratively resolve shift violations by swapping cells within the same row.
+        Only SWAPPABLE_FLOOR_SHIFTS and NaN may be moved.
+
+        Toggle each rule with .enabled on the objects below (priority = list order).
         """
-        print("\n\n")
-        print("DEBUG:: auto_balance_shifts()")
+        balance_rules = default_balance_rules()
 
-        for person in self.df.columns:
-            print("person:", person)
-            next_df = self.df[person].shift(-1)
+        # --- rule toggles ---
+        # set_balance_rule_enabled(balance_rules, 'no_trike_adjacent_lunch', False)
+        # set_balance_rule_enabled(balance_rules, 'no_trike_coro_adjacency', False)
+        # set_balance_rule_enabled(balance_rules, 'max_one_trike_coro_before_1pm', False)
+        # set_balance_rule_enabled(balance_rules, 'no_duplicate_consecutive', False)
 
-            for shift,next_shift in zip(self.df[person],next_df):
-                if shift not in STANDARD_FLOOR_SHIFTS or shift == 'Security':
-                    continue
+        max_iterations = 100
 
-                if shift == next_shift:
-                    print('shift copy!', shift)
-                    # mark as problem
-                    # Scan horizontally for a possible swap
-                
-                match shift:
-                    case 'Trike':
-                        if next_shift == 'CORO':
-                            print("Trike --> CORO nono")
-                    case 'CORO':
-                        if next_shift == 'Trike':
-                            print("CORO --> trike nono")
-                print("shifts:", shift, next_shift)
+        for iteration in range(max_iterations):
+            found_violation = False
 
-        
-        print("-------------")
-        print("\n\n")
-    
+            for col in self.df.columns:
+                col_series = self.df[col]
+
+                for i in range(len(col_series)):
+                    cell_value = col_series.iloc[i]
+                    row_label = col_series.index[i]
+
+                    is_nan = pd.isna(cell_value)
+                    if not is_nan and cell_value not in SWAPPABLE_FLOOR_SHIFTS:
+                        continue
+
+                    col_violations_before = count_column_violations(col_series, balance_rules)
+                    if col_violations_before == tuple(0 for _ in balance_rules):
+                        continue
+
+                    temp = col_series.copy()
+                    temp.iloc[i] = np.nan
+                    if count_column_violations(temp, balance_rules) >= col_violations_before:
+                        continue
+
+                    best_swap_col = None
+                    best_score = total_violations(self.df, balance_rules)
+
+                    for other_col in self.df.columns:
+                        if other_col == col:
+                            continue
+
+                        candidate_value = self.df.at[row_label, other_col]
+
+                        candidate_is_nan = pd.isna(candidate_value)
+                        if not candidate_is_nan and candidate_value not in SWAPPABLE_FLOOR_SHIFTS:
+                            continue
+
+                        sim_df = self.df.copy()
+                        sim_df.at[row_label, col] = candidate_value
+                        sim_df.at[row_label, other_col] = cell_value
+                        score = total_violations(sim_df, balance_rules)
+
+                        if score < best_score:
+                            best_score = score
+                            best_swap_col = other_col
+
+                    if best_swap_col is not None:
+                        orig_value = self.df.at[row_label, col]
+                        self.df.at[row_label, col] = self.df.at[row_label, best_swap_col]
+                        self.df.at[row_label, best_swap_col] = orig_value
+                        found_violation = True
+                        break
+
+                if found_violation:
+                    break
+
+            if not found_violation:
+                break
+        else:
+            messagebox.showwarning(
+                'Balance Warning',
+                'Could not fully resolve all conflicts. '
+                'Try running Balance again or adjust the schedule manually.'
+            )
+
+        self.update_sheet()
+
     def update_labels(self):
         undo_len = len(self.action_history_stack)
         undo_label = f"Undo ({undo_len})"
@@ -677,30 +872,25 @@ class inputFrame(tk.Frame):
         self.create_widgets()
 
     def create_widgets(self):
+        """
+        Create and place every button and interactable element used during schedule creation.
+        """
         self.nonstandardFrame = NonStandardShiftFrame(self,self.controller)
         self.standardFrame = StandardShiftFrame(self,self.controller)
         self.nonstandardFrame.grid(row=0, column=1, columnspan=2, rowspan=2, sticky="ne", pady=0, padx=4)
-        self.standardFrame.grid(row=0,column=0,columnspan=1, rowspan=5, sticky="w", pady=0)
+        self.standardFrame.grid(row=0,column=0,columnspan=1, rowspan=5, sticky="nw", pady=0)
 
         self.undo_button = tk.Button(self, text="Undo", command=self.controller.undo, width=13, height=2, foreground="#000000") 
-        #self.undo_button.config(background=secondary_button_color) 
         self.undo_button.grid(row=2, column=1, columnspan=1, sticky='e', pady=(10,0), padx=(0,1))
-        # self.undo_button.bind('<Enter>', lambda e: self.undo_button.configure(background=secondary_button_hover_color))
-        # self.undo_button.bind('<Leave>', lambda e: self.undo_button.configure(background=secondary_button_color))
 
         self.redo_button = tk.Button(self, text="Redo", command=self.controller.redo, width=13, height=2, foreground="#000000")
-        #self.redo_button.config(background=secondary_button_color)
         self.redo_button.grid(row=2, column=2, columnspan=1, sticky="w", pady=(10,0), padx=(1,0))
-        # self.redo_button.bind('<Enter>', lambda e: self.redo_button.configure(background=secondary_button_hover_color))
-        # self.redo_button.bind('<Leave>', lambda e: self.redo_button.configure(background=secondary_button_color))
 
         self.swap_button = tk.Button(self, text="Swap", command=lambda: self.controller._perform_with_undo(lambda: self.controller.swap()), width=13, height=2, foreground="#000000")
-        #self.swap_button.config(background=secondary_button_color)
-        self.swap_button.grid(row=3, column=1, columnspan=2, sticky="w", pady=(1,0), padx=(5,0))
+        self.swap_button.grid(row=3, column=1, columnspan=2, sticky="w", pady=(10,0), padx=(5,0))
 
-        #self.balance_button = tk.Button(self, text="Balance", command=lambda: self.controller._perform_with_undo(lambda:self.controller.auto_balance_shifts()), width=13, height=2, foreground="#000000")
-        #self.balance_button.grid(row=3, column=2, columnspan=2, sticky="w", pady=(1,0), padx=(1,5))
-
+        self.balance_button = tk.Button(self, text="Balance", command=lambda: self.controller._perform_with_undo(lambda:self.controller.auto_balance_shifts()), width=13, height=2, foreground="#000000")
+        self.balance_button.grid(row=3, column=2, columnspan=2, sticky="w", pady=(10,0), padx=(1,5))
 
 
 class NonStandardShiftFrame(tk.Frame):
