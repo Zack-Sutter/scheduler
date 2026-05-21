@@ -81,6 +81,7 @@ class ShiftBalanceRule:
     """One schedulable constraint for auto_balance_shifts."""
 
     name = 'base'
+    description = ''
 
     def __init__(self, enabled=True):
         self.enabled = enabled
@@ -98,6 +99,7 @@ class NoDuplicateConsecutiveRule(ShiftBalanceRule):
     """No duplicate consecutive swappable floor shifts in a column."""
 
     name = 'no_duplicate_consecutive'
+    description = 'No duplicate consecutive swappable floor shifts in a column.'
 
     def _count(self, col_series):
         values = col_series.tolist()
@@ -113,6 +115,7 @@ class NoTrikeCoroAdjacencyRule(ShiftBalanceRule):
     """Trike and CORO must not appear in adjacent rows (either order)."""
 
     name = 'no_trike_coro_adjacency'
+    description = 'Trike and CORO must not appear in adjacent rows (either order).'
 
     def _count(self, col_series):
         values = col_series.tolist()
@@ -128,6 +131,7 @@ class MaxOneTrikeCoroBefore1pmRule(ShiftBalanceRule):
     """At most one Trike or CORO in rows before 1 PM ('01:00')."""
 
     name = 'max_one_trike_coro_before_1pm'
+    description = "At most one Trike or CORO in rows before 1 PM ('01:00')."
 
     def _count(self, col_series):
         index = col_series.index.tolist()
@@ -149,6 +153,7 @@ class NoTrikeAdjacentLunchRule(ShiftBalanceRule):
     """Trike must not be directly adjacent to Lunch (either order)."""
 
     name = 'no_trike_adjacent_lunch'
+    description = 'Trike must not be directly adjacent to Lunch (either order).'
 
     def _count(self, col_series):
         values = col_series.tolist()
@@ -210,6 +215,127 @@ def introduces_no_new_violations(df, row_label, col_name, new_value, rules):
     new_score = count_column_violations(df_copy[col_name], rules)
 
     return new_score <= current_score
+
+
+def format_balance_rule_line(index, rule):
+    """Display text for one rule in the balance dialog listbox."""
+    flag = '[on]' if rule.enabled else '[off]'
+    return f'{flag}  {index + 1}.  {rule.description}'
+
+
+def _bind_button_hover(button, normal_color, hover_color):
+    button.configure(background=normal_color)
+    button.bind('<Enter>', lambda _e: button.configure(background=hover_color))
+    button.bind('<Leave>', lambda _e: button.configure(background=normal_color))
+
+
+class BalanceRulesDialog(tk.Toplevel):
+    """Modal dialog to enable, disable, and reorder balance rules before applying."""
+
+    def __init__(self, parent, on_apply):
+        super().__init__(parent)
+        self.on_apply = on_apply
+        self.title('Balance Shifts')
+        self.configure(background='lightblue')
+        self.transient(parent)
+        self.grab_set()
+
+        self.rules = copy.deepcopy(default_balance_rules())
+
+        intro = tk.Label(
+            self,
+            text='Rules run top to bottom. Higher rules win when trade-offs occur.',
+            background='lightblue',
+            justify='left',
+            wraplength=520,
+        )
+        intro.pack(anchor='w', padx=10, pady=(10, 5))
+
+        content = tk.Frame(self, relief=tk.GROOVE, borderwidth=2, background='lightblue')
+        content.pack(fill='both', expand=True, padx=10, pady=5)
+
+        self.rule_listbox = tk.Listbox(content, width=72, height=6, selectmode='single')
+        self.rule_listbox.pack(side='left', fill='both', expand=True, padx=(5, 0), pady=5)
+
+        controls = tk.Frame(content, background='lightblue')
+        controls.pack(side='left', fill='y', padx=5, pady=5)
+
+        toggle_btn = tk.Button(controls, text='Enable / Disable', command=self._toggle_selected, width=14)
+        toggle_btn.pack(pady=(0, 5))
+
+        up_btn = tk.Button(controls, text='Move Up', command=self._move_up, width=14)
+        up_btn.pack(pady=5)
+
+        down_btn = tk.Button(controls, text='Move Down', command=self._move_down, width=14)
+        down_btn.pack(pady=5)
+
+        action_row = tk.Frame(self, background='lightblue')
+        action_row.pack(fill='x', padx=10, pady=(5, 10))
+
+        cancel_btn = tk.Button(
+            action_row,
+            text='Cancel',
+            command=self.destroy,
+            width=12,
+            foreground='#ffffff',
+        )
+        cancel_btn.pack(side='right', padx=(5, 0))
+        _bind_button_hover(cancel_btn, secondary_button_color, secondary_button_hover_color)
+
+        apply_btn = tk.Button(action_row, text='Apply', command=self._apply, width=12)
+        apply_btn.pack(side='right')
+        _bind_button_hover(apply_btn, primary_button_color, primary_button_hover_color)
+
+        self.refresh_rule_list()
+        self.rule_listbox.selection_set(0)
+
+    def refresh_rule_list(self):
+        selection = self.rule_listbox.curselection()
+        selected_index = selection[0] if selection else 0
+
+        self.rule_listbox.delete(0, tk.END)
+        for index, rule in enumerate(self.rules):
+            self.rule_listbox.insert(tk.END, format_balance_rule_line(index, rule))
+
+        if self.rules:
+            selected_index = min(selected_index, len(self.rules) - 1)
+            self.rule_listbox.selection_set(selected_index)
+            self.rule_listbox.see(selected_index)
+
+    def _selected_index(self):
+        selection = self.rule_listbox.curselection()
+        if not selection:
+            return None
+        return selection[0]
+
+    def _toggle_selected(self):
+        index = self._selected_index()
+        if index is None:
+            return
+        self.rules[index].enabled = not self.rules[index].enabled
+        self.refresh_rule_list()
+
+    def _move_up(self):
+        index = self._selected_index()
+        if index is None or index == 0:
+            return
+        self.rules[index], self.rules[index - 1] = self.rules[index - 1], self.rules[index]
+        self.refresh_rule_list()
+        self.rule_listbox.selection_set(index - 1)
+        self.rule_listbox.see(index - 1)
+
+    def _move_down(self):
+        index = self._selected_index()
+        if index is None or index >= len(self.rules) - 1:
+            return
+        self.rules[index], self.rules[index + 1] = self.rules[index + 1], self.rules[index]
+        self.refresh_rule_list()
+        self.rule_listbox.selection_set(index + 1)
+        self.rule_listbox.see(index + 1)
+
+    def _apply(self):
+        self.on_apply(self.rules)
+        self.destroy()
 
 
 # ---------------------------------------------------------------------------
@@ -521,20 +647,24 @@ class ScheduleApp(tk.Tk):
         self.update_sheet()
         self.update_labels()
 
-    def auto_balance_shifts(self):
+    def show_balance_rules_dialog(self):
+        """Open the balance rules dialog; apply runs auto_balance with undo."""
+        if self.df.empty:
+            messagebox.showwarning('Balance Error', 'No schedule created yet. Create a blank schedule first.')
+            return
+        BalanceRulesDialog(self, on_apply=self._apply_balance_rules)
+
+    def _apply_balance_rules(self, rules):
+        self._perform_with_undo(lambda: self.auto_balance_shifts(rules))
+
+    def auto_balance_shifts(self, balance_rules=None):
         """
         Iteratively resolve shift violations by swapping cells within the same row.
         Only SWAPPABLE_FLOOR_SHIFTS and NaN may be moved.
 
-        Toggle each rule with .enabled on the objects below (priority = list order).
+        Rule priority and enabled flags come from balance_rules (list order).
         """
-        balance_rules = default_balance_rules()
-
-        # --- rule toggles ---
-        # set_balance_rule_enabled(balance_rules, 'no_trike_adjacent_lunch', False)
-        # set_balance_rule_enabled(balance_rules, 'no_trike_coro_adjacency', False)
-        # set_balance_rule_enabled(balance_rules, 'max_one_trike_coro_before_1pm', False)
-        # set_balance_rule_enabled(balance_rules, 'no_duplicate_consecutive', False)
+        balance_rules = balance_rules or default_balance_rules()
 
         max_iterations = 100
 
@@ -889,7 +1019,7 @@ class inputFrame(tk.Frame):
         self.swap_button = tk.Button(self, text="Swap", command=lambda: self.controller._perform_with_undo(lambda: self.controller.swap()), width=13, height=2, foreground="#000000")
         self.swap_button.grid(row=3, column=1, columnspan=2, sticky="w", pady=(10,0), padx=(5,0))
 
-        self.balance_button = tk.Button(self, text="Balance", command=lambda: self.controller._perform_with_undo(lambda:self.controller.auto_balance_shifts()), width=13, height=2, foreground="#000000")
+        self.balance_button = tk.Button(self, text="Balance", command=self.controller.show_balance_rules_dialog, width=13, height=2, foreground="#000000")
         self.balance_button.grid(row=3, column=2, columnspan=2, sticky="w", pady=(10,0), padx=(1,5))
 
 
