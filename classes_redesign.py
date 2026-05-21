@@ -99,7 +99,7 @@ class NoDuplicateConsecutiveRule(ShiftBalanceRule):
     """No duplicate consecutive swappable floor shifts in a column."""
 
     name = 'no_duplicate_consecutive'
-    description = 'No duplicate consecutive swappable floor shifts in a column.'
+    description = 'No duplicate consecutive shifts.'
 
     def _count(self, col_series):
         values = col_series.tolist()
@@ -115,7 +115,7 @@ class NoTrikeCoroAdjacencyRule(ShiftBalanceRule):
     """Trike and CORO must not appear in adjacent rows (either order)."""
 
     name = 'no_trike_coro_adjacency'
-    description = 'Trike and CORO must not appear in adjacent rows (either order).'
+    description = 'No consecutiveTrike/CORO.'
 
     def _count(self, col_series):
         values = col_series.tolist()
@@ -131,7 +131,7 @@ class MaxOneTrikeCoroBefore1pmRule(ShiftBalanceRule):
     """At most one Trike or CORO in rows before 1 PM ('01:00')."""
 
     name = 'max_one_trike_coro_before_1pm'
-    description = "At most one Trike or CORO in rows before 1 PM ('01:00')."
+    description = "Minimize Trike/CORO before 1 PM."
 
     def _count(self, col_series):
         index = col_series.index.tolist()
@@ -153,7 +153,7 @@ class NoTrikeAdjacentLunchRule(ShiftBalanceRule):
     """Trike must not be directly adjacent to Lunch (either order)."""
 
     name = 'no_trike_adjacent_lunch'
-    description = 'Trike must not be directly adjacent to Lunch (either order).'
+    description = 'Trike not adjacent to Lunch.'
 
     def _count(self, col_series):
         values = col_series.tolist()
@@ -244,7 +244,7 @@ class BalanceRulesDialog(tk.Toplevel):
 
         intro = tk.Label(
             self,
-            text='Rules run top to bottom. Higher rules win when trade-offs occur.',
+            text='Rules run top to bottom. Order matters.',
             background='lightblue',
             justify='left',
             wraplength=520,
