@@ -13,8 +13,17 @@ import logging
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor, QCloseEvent, QFontMetrics, QPainter, QPen
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QCloseEvent,
+    QFontMetrics,
+    QKeySequence,
+    QPainter,
+    QPen,
+)
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QButtonGroup,
     QDialog,
@@ -132,6 +141,7 @@ def label_with_subtitle(title: str, subtitle: str) -> QWidget:
     title_label.setFont(title_font)
     layout.addWidget(title_label)
     sub = QLabel(subtitle)
+    sub.setWordWrap(True)
     sub_font = sub.font()
     sub_font.setPointSize(max(regular_font_size - 2, 6))
     sub.setFont(sub_font)
@@ -173,10 +183,76 @@ class SelectionRegion:
         return flat
 
 
+def _cell_to_clipboard_text(value) -> str:
+    if pd.isna(value) or value == '':
+        return ''
+    return str(value)
+
+
+def selection_values_to_tsv(values_2d: list[list]) -> str:
+    return '\n'.join(
+        '\t'.join(_cell_to_clipboard_text(cell) for cell in row) for row in values_2d
+    )
+
+
+def parse_clipboard_tsv(text: str) -> list[list[str]]:
+    if not text:
+        return []
+    lines = text.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    if lines and lines[-1] == '':
+        lines = lines[:-1]
+    return [line.split('\t') for line in lines]
+
+
+def apply_sheet_paste(
+    df: pd.DataFrame, region: SelectionRegion, grid: list[list[str]]
+) -> None:
+    if not grid:
+        return
+    grid_rows = len(grid)
+    grid_cols = max(len(row) for row in grid)
+    if grid_cols == 0:
+        return
+
+    paste_rows = min(grid_rows, len(df.index) - region.from_row)
+    paste_cols = min(grid_cols, len(df.columns) - region.from_col)
+    if paste_rows <= 0 or paste_cols <= 0:
+        return
+
+    row_labels = df.index[region.from_row : region.from_row + paste_rows]
+    col_labels = df.columns[region.from_col : region.from_col + paste_cols]
+    values = []
+    for row_idx in range(paste_rows):
+        row = grid[row_idx]
+        row_vals = []
+        for col_idx in range(paste_cols):
+            text = row[col_idx] if col_idx < len(row) else ''
+            row_vals.append(np.nan if text == '' else text)
+        values.append(row_vals)
+
+    block = pd.DataFrame(values, index=row_labels, columns=col_labels)
+    df.loc[row_labels, col_labels] = block
+
+
 class ScheduleTableModel(QAbstractTableModel):
+    EMPTY_COUNT_COL = 0
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._df = pd.DataFrame()
+
+    @classmethod
+    def df_column_index(cls, model_col: int) -> int | None:
+        if model_col == cls.EMPTY_COUNT_COL:
+            return None
+        return model_col - 1
+
+    @classmethod
+    def model_column_index(cls, df_col: int) -> int:
+        return df_col + 1
+
+    def _row_empty_count(self, row: int) -> int:
+        return sum(1 for value in self._df.iloc[row] if pd.isna(value) or value == '')
 
     def set_dataframe(self, df: pd.DataFrame, full_reset: bool = False) -> None:
         if full_reset or self._df.shape != df.shape or list(self._df.columns) != list(df.columns):
@@ -186,7 +262,10 @@ class ScheduleTableModel(QAbstractTableModel):
         else:
             self._df = df.copy()
             top_left = self.index(0, 0)
-            bottom_right = self.index(max(0, len(self._df) - 1), max(0, len(self._df.columns) - 1))
+            bottom_right = self.index(
+                max(0, len(self._df) - 1),
+                max(0, len(self._df.columns)),
+            )
             self.dataChanged.emit(
                 top_left, bottom_right, [Qt.DisplayRole, Qt.BackgroundRole, Qt.ForegroundRole]
             )
@@ -199,12 +278,20 @@ class ScheduleTableModel(QAbstractTableModel):
     def columnCount(self, parent=QModelIndex()) -> int:
         if parent.isValid():
             return 0
-        return len(self._df.columns)
+        return len(self._df.columns) + 1
 
     def data(self, index: QModelIndex, role=Qt.DisplayRole):
         if not index.isValid():
             return None
-        value = self._df.iat[index.row(), index.column()]
+        if index.column() == self.EMPTY_COUNT_COL:
+            if role == Qt.DisplayRole:
+                return str(self._row_empty_count(index.row()))
+            if role == Qt.TextAlignmentRole:
+                return Qt.AlignCenter
+            if role == Qt.ForegroundRole:
+                return QBrush(QColor(subtitle_text_color))
+            return None
+        value = self._df.iat[index.row(), index.column() - 1]
         if role == Qt.DisplayRole:
             return '' if pd.isna(value) else str(value)
         if role == Qt.BackgroundRole:
@@ -219,8 +306,11 @@ class ScheduleTableModel(QAbstractTableModel):
         if role != Qt.DisplayRole:
             return None
         if orientation == Qt.Horizontal:
-            if section < len(self._df.columns):
-                return str(self._df.columns[section])
+            if section == self.EMPTY_COUNT_COL:
+                return ''
+            df_col = section - 1
+            if 0 <= df_col < len(self._df.columns):
+                return str(self._df.columns[df_col])
         elif section < len(self._df.index):
             return str(self._df.index[section])
         return None
@@ -228,6 +318,8 @@ class ScheduleTableModel(QAbstractTableModel):
     def flags(self, index: QModelIndex):
         if not index.isValid():
             return Qt.NoItemFlags
+        if index.column() == self.EMPTY_COUNT_COL:
+            return Qt.ItemIsEnabled
         return Qt.ItemIsEnabled | Qt.ItemIsSelectable
 
 
@@ -275,10 +367,29 @@ class ScheduleTableView(QTableView):
         self.viewport().update()
         self.regions_changed.emit()
 
+    def _df_col_range_from_model_cols(self, col_a: int, col_b: int) -> tuple[int, int] | None:
+        lo, hi = min(col_a, col_b), max(col_a, col_b)
+        df_cols = [
+            c
+            for c in (
+                ScheduleTableModel.df_column_index(col)
+                for col in range(lo, hi + 1)
+            )
+            if c is not None
+        ]
+        if not df_cols:
+            return None
+        return min(df_cols), max(df_cols) + 1
+
     def _on_column_header_clicked(self, column: int) -> None:
         if self.model() is None or self.model().rowCount() == 0:
             return
-        region = SelectionRegion(0, self.model().rowCount(), column, column + 1)
+        if column == ScheduleTableModel.EMPTY_COUNT_COL:
+            return
+        df_col = ScheduleTableModel.df_column_index(column)
+        if df_col is None:
+            return
+        region = SelectionRegion(0, self.model().rowCount(), df_col, df_col + 1)
         self.set_regions([region])
 
     def mousePressEvent(self, event):
@@ -295,11 +406,17 @@ class ScheduleTableView(QTableView):
             if end_index.isValid():
                 r0, c0 = self._drag_anchor
                 r1, c1 = end_index.row(), end_index.column()
+                col_range = self._df_col_range_from_model_cols(c0, c1)
+                if col_range is None:
+                    self._drag_anchor = None
+                    super().mouseReleaseEvent(event)
+                    return
+                from_col, upto_col = col_range
                 region = SelectionRegion(
                     min(r0, r1),
                     max(r0, r1) + 1,
-                    min(c0, c1),
-                    max(c0, c1) + 1,
+                    from_col,
+                    upto_col,
                 )
                 if event.modifiers() & Qt.ControlModifier:
                     regions = self._regions + [region]
@@ -311,6 +428,32 @@ class ScheduleTableView(QTableView):
         self._drag_anchor = None
         super().mouseReleaseEvent(event)
 
+    def _schedule_controller(self):
+        parent = self.parent()
+        if parent is not None and hasattr(parent, 'controller'):
+            return parent.controller
+        return None
+
+    def keyPressEvent(self, event):
+        controller = self._schedule_controller()
+        if controller is None:
+            super().keyPressEvent(event)
+            return
+        if event.matches(QKeySequence.Copy):
+            controller.copy_sheet_selection()
+            event.accept()
+            controller.statusBar().showMessage("Copied to clipboard", 2000)
+            return
+        if event.matches(QKeySequence.Paste):
+            controller.paste_sheet_selection()
+            event.accept()
+            return
+        if event.matches(QKeySequence.Cut):
+            controller.cut_sheet_selection()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def paintEvent(self, event):
         super().paintEvent(event)
         if not self._regions:
@@ -320,9 +463,16 @@ class ScheduleTableView(QTableView):
         pen = QPen(QColor('#2563eb'), 2)
         painter.setPen(pen)
         for region in self._regions:
-            top_left = self.visualRect(self.model().index(region.from_row, region.from_col))
+            top_left = self.visualRect(
+                self.model().index(
+                    region.from_row, ScheduleTableModel.model_column_index(region.from_col)
+                )
+            )
             bottom_right = self.visualRect(
-                self.model().index(region.upto_row - 1, region.upto_col - 1)
+                self.model().index(
+                    region.upto_row - 1,
+                    ScheduleTableModel.model_column_index(region.upto_col - 1),
+                )
             )
             rect = top_left.united(bottom_right)
             painter.drawRect(rect.adjusted(0, 0, -1, -1))
@@ -339,32 +489,17 @@ class BalanceRulesDialog(QDialog):
         self.rules = copy.deepcopy(default_balance_rules())
 
         layout = QVBoxLayout(self)
-        intro = QLabel('Rules run top to bottom. Order matters.')
-        intro.setWordWrap(True)
-        layout.addWidget(intro)
+        layout.addWidget(label_with_subtitle(
+            'Rules run top to bottom',
+            'Drag to reorder.  Double click to enable/disable',
+        ))
 
-        content = QHBoxLayout()
         self.rule_list = QListWidget()
-        content.addWidget(self.rule_list, stretch=1)
-
-        controls = QVBoxLayout()
-        self.toggle_btn = QPushButton('Enable / Disable')
-        self.toggle_btn.setObjectName('primaryBtn')
-        self.toggle_btn.clicked.connect(self._toggle_selected)
-        controls.addWidget(self.toggle_btn)
-        up_btn = QPushButton('Move Up')
-        up_btn.setObjectName('primaryBtn')
-        up_btn.clicked.connect(self._move_up)
-        controls.addWidget(up_btn)
-        down_btn = QPushButton('Move Down')
-        down_btn.setObjectName('primaryBtn')
-        down_btn.clicked.connect(self._move_down)
-        controls.addWidget(down_btn)
-        content.addLayout(controls)
-        layout.addLayout(content)
-
-        self.rule_list.currentRowChanged.connect(self._update_toggle_button)
-        self.rule_list.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.rule_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.rule_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.rule_list.itemDoubleClicked.connect(self._on_rule_double_clicked)
+        self.rule_list.model().rowsMoved.connect(self._on_rules_reordered)
+        layout.addWidget(self.rule_list, stretch=1)
 
         buttons = QDialogButtonBox()
         cancel_btn = QPushButton('Cancel')
@@ -381,63 +516,43 @@ class BalanceRulesDialog(QDialog):
         self.refresh_rule_list()
         self.rule_list.setCurrentRow(0)
 
-    def _restyle_button(self, button: QPushButton) -> None:
-        style = button.style()
-        style.unpolish(button)
-        style.polish(button)
-        button.update()
-
-    def _update_toggle_button(self) -> None:
-        index = self._selected_index()
-        if index is None:
-            self.toggle_btn.setText('Enable / Disable')
-            self.toggle_btn.setObjectName('primaryBtn')
-        elif self.rules[index].enabled:
-            self.toggle_btn.setText('Disable')
-            self.toggle_btn.setObjectName('disableBtn')
-        else:
-            self.toggle_btn.setText('Enable')
-            self.toggle_btn.setObjectName('enableBtn')
-        self._restyle_button(self.toggle_btn)
+    def _style_rule_item(self, item: QListWidgetItem, rule) -> None:
+        color = text_color if rule.enabled else subtitle_text_color
+        item.setForeground(QBrush(QColor(color)))
 
     def refresh_rule_list(self):
         row = self.rule_list.currentRow()
         self.rule_list.clear()
         for index, rule in enumerate(self.rules):
             item = QListWidgetItem(format_balance_rule_line(index, rule))
-            item.setForeground(QBrush(QColor(text_color)))
+            item.setData(Qt.ItemDataRole.UserRole, rule)
+            self._style_rule_item(item, rule)
             self.rule_list.addItem(item)
         if self.rules:
             row = min(max(row, 0), len(self.rules) - 1)
             self.rule_list.setCurrentRow(row)
-        self._update_toggle_button()
 
-    def _selected_index(self):
-        row = self.rule_list.currentRow()
-        return None if row < 0 else row
+    def _sync_rules_from_list(self) -> None:
+        self.rules = [
+            self.rule_list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self.rule_list.count())
+        ]
+        for index, rule in enumerate(self.rules):
+            item = self.rule_list.item(index)
+            item.setText(format_balance_rule_line(index, rule))
+            self._style_rule_item(item, rule)
 
-    def _toggle_selected(self):
-        index = self._selected_index()
-        if index is None:
+    def _on_rules_reordered(self, parent, start, end, destination, row) -> None:
+        self._sync_rules_from_list()
+
+    def _on_rule_double_clicked(self, item: QListWidgetItem) -> None:
+        row = self.rule_list.row(item)
+        if row < 0:
             return
-        self.rules[index].enabled = not self.rules[index].enabled
+        rule = item.data(Qt.ItemDataRole.UserRole)
+        rule.enabled = not rule.enabled
         self.refresh_rule_list()
-
-    def _move_up(self):
-        index = self._selected_index()
-        if index is None or index == 0:
-            return
-        self.rules[index], self.rules[index - 1] = self.rules[index - 1], self.rules[index]
-        self.refresh_rule_list()
-        self.rule_list.setCurrentRow(index - 1)
-
-    def _move_down(self):
-        index = self._selected_index()
-        if index is None or index >= len(self.rules) - 1:
-            return
-        self.rules[index], self.rules[index + 1] = self.rules[index + 1], self.rules[index]
-        self.refresh_rule_list()
-        self.rule_list.setCurrentRow(index + 1)
+        self.rule_list.setCurrentRow(row)
 
     def _apply(self):
         self.on_apply(self.rules)
@@ -520,10 +635,15 @@ class SheetFrame(QWidget):
         if view.showGrid():
             viewport_w = max(1, viewport_w - max(0, cols - 1))
 
-        base_col_w = viewport_w // cols
-        extra_col_w = viewport_w - base_col_w * cols
-        for col in range(cols):
-            view.setColumnWidth(col, base_col_w + (1 if col < extra_col_w else 0))
+        fm = QFontMetrics(view.font())
+        empty_count_w = fm.horizontalAdvance('00') + 8
+        data_cols = cols - 1
+        data_viewport_w = max(1, viewport_w - empty_count_w)
+        view.setColumnWidth(ScheduleTableModel.EMPTY_COUNT_COL, empty_count_w)
+        base_col_w = data_viewport_w // data_cols
+        extra_col_w = data_viewport_w - base_col_w * data_cols
+        for offset, col in enumerate(range(1, cols)):
+            view.setColumnWidth(col, base_col_w + (1 if offset < extra_col_w else 0))
 
         view.verticalHeader().resizeSections()
         view.horizontalScrollBar().setValue(0)
@@ -805,6 +925,47 @@ class ScheduleApp(QMainWindow):
         time_start, time_end = region.time_range(self.df)
         workers = region.column_names(self.df)
         return {'workers': workers, 'time_start': time_start, 'time_end': time_end}
+
+    def _primary_sheet_region(self) -> SelectionRegion | None:
+        if not self.sheet_frame:
+            return None
+        regions = self.sheet_frame.table_view.selection_regions()
+        if not regions:
+            return None
+        return regions[0]
+
+    def copy_sheet_selection(self) -> None:
+        region = self._primary_sheet_region()
+        if region is None:
+            return
+        text = selection_values_to_tsv(region.values_2d(self.df))
+        QApplication.clipboard().setText(text)
+
+    def _paste_sheet_region(self, region: SelectionRegion, grid: list[list[str]]) -> None:
+        apply_sheet_paste(self.df, region, grid)
+        self.update_sheet()
+
+    def paste_sheet_selection(self) -> None:
+        region = self._primary_sheet_region()
+        if region is None:
+            return
+        grid = parse_clipboard_tsv(QApplication.clipboard().text())
+        if not grid:
+            return
+        self._perform_with_undo(self._paste_sheet_region, region, grid)
+
+    def _clear_sheet_region(self, region: SelectionRegion) -> None:
+        time_start, time_end = region.time_range(self.df)
+        workers = region.column_names(self.df)
+        self.df.loc[time_start:time_end, workers] = np.nan
+        self.update_sheet()
+
+    def cut_sheet_selection(self) -> None:
+        region = self._primary_sheet_region()
+        if region is None:
+            return
+        self.copy_sheet_selection()
+        self._perform_with_undo(self._clear_sheet_region, region)
 
     def add_nonstandard_shift(self, selection):
         self.df.loc[

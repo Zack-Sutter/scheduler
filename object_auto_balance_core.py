@@ -93,7 +93,7 @@ class NoDuplicateConsecutiveRule(ShiftBalanceRule):
 
 class NoTrikeCoroAdjacencyRule(ShiftBalanceRule):
     name = 'no_trike_coro_adjacency'
-    description = 'No consecutiveTrike/CORO.'
+    description = 'No consecutive Trike/CORO.'
 
     def _count(self, col_series):
         values = col_series.tolist()
@@ -105,9 +105,9 @@ class NoTrikeCoroAdjacencyRule(ShiftBalanceRule):
         return violations
 
 
-class MaxOneTrikeCoroBefore1pmRule(ShiftBalanceRule):
-    name = 'max_one_trike_coro_before_1pm'
-    description = 'Minimize Trike/CORO before 1 PM.'
+class TrikeCoroBefore1pmRule(ShiftBalanceRule):
+    name = 'trike_coro_before_1pm'
+    description = 'Balance Trike/CORO before 1 PM.'
 
     def _count(self, col_series):
         index = col_series.index.tolist()
@@ -142,7 +142,7 @@ def default_balance_rules():
     return [
         NoDuplicateConsecutiveRule(),
         NoTrikeCoroAdjacencyRule(),
-        MaxOneTrikeCoroBefore1pmRule(),
+        TrikeCoroBefore1pmRule(),
         NoTrikeAdjacentLunchRule(),
     ]
 
