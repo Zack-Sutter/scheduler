@@ -452,6 +452,14 @@ class ScheduleTableView(QTableView):
             controller.cut_sheet_selection()
             event.accept()
             return
+        if event.matches(QKeySequence.Undo):
+            controller.undo()
+            event.accept()
+            return
+        if event.matches(QKeySequence.Redo):
+            controller.redo()
+            event.accept()
+            return
         super().keyPressEvent(event)
 
     def paintEvent(self, event):
@@ -568,8 +576,12 @@ class SheetFrame(QWidget):
         self.controller = controller
         self._frame_width = self.FRAME_WIDTH
         self._frame_height = self.FRAME_HEIGHT
+        self._has_schedule = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        self.blank_panel = QWidget()
+        self.blank_panel.setStyleSheet(f'background-color: {text_field_color};')
+        layout.addWidget(self.blank_panel)
         self.model = ScheduleTableModel(self)
         self.table_view = ScheduleTableView(self)
         self.table_view.setObjectName('scheduleTable')
@@ -590,7 +602,16 @@ class SheetFrame(QWidget):
         v_header.setSectionResizeMode(QHeaderView.Stretch)
         v_header.setMinimumSectionSize(1)
         v_header.setStretchLastSection(False)
+        self.table_view.hide()
         layout.addWidget(self.table_view)
+
+    def has_schedule(self) -> bool:
+        return self._has_schedule
+
+    def show_schedule(self) -> None:
+        self._has_schedule = True
+        self.blank_panel.hide()
+        self.table_view.show()
 
     def set_frame_size(self, width: int, height: int) -> None:
         self._frame_width = width
@@ -623,6 +644,8 @@ class SheetFrame(QWidget):
         return max(1, frame_w - header_w), max(1, frame_h - header_h)
 
     def _fit_table_to_frame(self) -> None:
+        if not self._has_schedule:
+            return
         view = self.table_view
         rows = self.model.rowCount()
         cols = self.model.columnCount()
@@ -650,6 +673,8 @@ class SheetFrame(QWidget):
         view.verticalScrollBar().setValue(0)
 
     def update_sheet(self):
+        if not self._has_schedule:
+            return
         df = self.controller.df.copy()
         full_reset = self.model.rowCount() == 0 or self.model.columnCount() == 0
         self.model.set_dataframe(df.fillna(''), full_reset=full_reset)
@@ -801,7 +826,10 @@ class ScheduleApp(QMainWindow):
         self.action_history_stack = []
         self.action_redo_stack = []
         self.df = pd.DataFrame()
-        self.sheet_frame: SheetFrame | None = None
+        self.sheet_frame = SheetFrame(self)
+        self.sheet_frame.set_frame_size(
+            SheetFrame.FRAME_WIDTH, SheetFrame.FRAME_HEIGHT
+        )
         self.inputs: InputFrame | None = None
         self.paid_workers: list = []
         self.volunteers: list = []
@@ -837,29 +865,39 @@ class ScheduleApp(QMainWindow):
         self.operating_hours = QLineEdit('10:00 - 5:00')
         left.addWidget(self.operating_hours)
 
+        lunch_frame = QFrame()
+        lunch_frame.setFrameStyle(QFrame.Box | QFrame.Plain)
+        lunch_row = QHBoxLayout(lunch_frame)
+
+        timing_col = QVBoxLayout()
         lunch_label = QLabel('Early or late lunches today?')
         lunch_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        left.addWidget(lunch_label)
+        timing_col.addWidget(lunch_label)
         self.lunch_timing_group = QButtonGroup(self)
         early_lunch = QRadioButton('Early')
         late_lunch = QRadioButton('Late')
         late_lunch.setChecked(True)
         self.lunch_timing_group.addButton(early_lunch, 0)
         self.lunch_timing_group.addButton(late_lunch, 1)
-        left.addWidget(early_lunch)
-        left.addWidget(late_lunch)
+        timing_col.addWidget(early_lunch)
+        timing_col.addWidget(late_lunch)
+        lunch_row.addLayout(timing_col)
 
+        hour_col = QVBoxLayout()
         hour_lunch_label = QLabel('Hour Lunches?')
         hour_lunch_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        left.addWidget(hour_lunch_label)
+        hour_col.addWidget(hour_lunch_label)
         self.hour_lunch_group = QButtonGroup(self)
         hour_yes = QRadioButton('Yes')
         hour_no = QRadioButton('No')
         hour_yes.setChecked(True)
         self.hour_lunch_group.addButton(hour_yes, 1)
         self.hour_lunch_group.addButton(hour_no, 0)
-        left.addWidget(hour_yes)
-        left.addWidget(hour_no)
+        hour_col.addWidget(hour_yes)
+        hour_col.addWidget(hour_no)
+        lunch_row.addLayout(hour_col)
+
+        left.addWidget(lunch_frame)
 
         create_btn = QPushButton('Create Blank')
         create_btn.setObjectName('primaryBtn')
@@ -878,8 +916,7 @@ class ScheduleApp(QMainWindow):
         self.schedule_area = QWidget()
         schedule_layout = QVBoxLayout(self.schedule_area)
         schedule_layout.setContentsMargins(0, 0, 0, 0)
-        self.schedule_placeholder = QWidget()
-        schedule_layout.addWidget(self.schedule_placeholder, stretch=1)
+        schedule_layout.addWidget(self.sheet_frame, stretch=1)
         right.addWidget(self.schedule_area, stretch=3)
 
         self.inputs_host = QWidget()
@@ -903,19 +940,15 @@ class ScheduleApp(QMainWindow):
         self.load_notes()
 
     def _destroy_schedule_widgets(self) -> None:
-        if self.sheet_frame is not None:
-            self.sheet_frame.deleteLater()
-            self.sheet_frame = None
         if self.inputs is not None:
             self.inputs.deleteLater()
             self.inputs = None
 
     def update_sheet(self):
-        if self.sheet_frame:
-            self.sheet_frame.update_sheet()
+        self.sheet_frame.update_sheet()
 
     def get_sheet_selection(self) -> dict | None:
-        if not self.sheet_frame:
+        if not self.sheet_frame.has_schedule():
             return None
         regions = self.sheet_frame.table_view.selection_regions()
         if not regions:
@@ -927,7 +960,7 @@ class ScheduleApp(QMainWindow):
         return {'workers': workers, 'time_start': time_start, 'time_end': time_end}
 
     def _primary_sheet_region(self) -> SelectionRegion | None:
-        if not self.sheet_frame:
+        if not self.sheet_frame.has_schedule():
             return None
         regions = self.sheet_frame.table_view.selection_regions()
         if not regions:
@@ -975,7 +1008,7 @@ class ScheduleApp(QMainWindow):
         self.update_sheet()
 
     def add_standard_shift(self, shift):
-        if not self.sheet_frame:
+        if not self.sheet_frame.has_schedule():
             return
         regions = self.sheet_frame.table_view.selection_regions()
         if not regions:
@@ -1075,7 +1108,7 @@ class ScheduleApp(QMainWindow):
         self.update_labels()
 
     def swap(self):
-        if not self.sheet_frame:
+        if not self.sheet_frame.has_schedule():
             return
         regions = self.sheet_frame.table_view.selection_regions()
         if len(regions) < 2:
@@ -1207,7 +1240,7 @@ class ScheduleApp(QMainWindow):
             file.write(self.notes_text_box.toPlainText())
 
     def create_schedule(self):
-        if self.sheet_frame:
+        if self.sheet_frame.has_schedule():
             self.action_history_stack = []
             self.action_redo_stack = []
             self.update_labels()
@@ -1243,16 +1276,10 @@ class ScheduleApp(QMainWindow):
         if end >= 19:
             self.fill_dinner()
 
-        self.sheet_frame = SheetFrame(self)
         height = 415 if end > 17 else 365
         self.sheet_frame.set_frame_size(975, height)
-
-        schedule_layout = self.schedule_area.layout()
-        if self.schedule_placeholder is not None:
-            schedule_layout.removeWidget(self.schedule_placeholder)
-            self.schedule_placeholder.deleteLater()
-            self.schedule_placeholder = None
-        schedule_layout.insertWidget(0, self.sheet_frame)
+        self.sheet_frame.show_schedule()
+        self.update_sheet()
 
         self.inputs = InputFrame(self)
         while self.inputs_layout.count():
@@ -1261,7 +1288,7 @@ class ScheduleApp(QMainWindow):
                 item.widget().deleteLater()
         self.inputs_layout.addWidget(self.inputs)
 
-        self.update_sheet()
+        self.update_labels()
 
     def fill_lunch(self, is_late_lunch, is_hour_lunch):
         possible_lunch_times = ['11:00', '11:30', '12:00', '12:30', '01:00', '01:30']
