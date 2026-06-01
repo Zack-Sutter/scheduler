@@ -186,7 +186,7 @@ def shift_background_color(shift) -> str | None:
         return None
     info = SHIFT_INFO.get(shift)
     if not info:
-        return None
+        return '#FFFFFF'
     color = info['color']
     if not color.startswith('#'):
         color = f'#{color}'

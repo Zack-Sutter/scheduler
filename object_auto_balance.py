@@ -12,7 +12,16 @@ import pandas as pd
 import logging
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QEasingCurve,
+    QModelIndex,
+    QPoint,
+    QPropertyAnimation,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -128,6 +137,90 @@ QPushButton#disableBtn:hover {{
     background-color: {disable_button_hover_color};
 }}
 """
+
+
+class ToastManager:
+    MARGIN = 16
+    SLIDE_MS = 250
+    DEFAULT_DURATION_MS = 2000
+
+    def __init__(self, parent: QWidget):
+        self._parent = parent
+        self._active_toast: QWidget | None = None
+        self._active_animation: QPropertyAnimation | None = None
+
+    def show(self, message: str, background_color: str = enable_button_color, duration_ms: int = DEFAULT_DURATION_MS) -> None:
+        if self._active_toast is not None:
+            self._active_toast.deleteLater()
+            self._active_toast = None
+            self._active_animation = None
+
+        toast = QWidget(self._parent)
+        toast.setObjectName('toast')
+        toast.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        toast.setStyleSheet(f"""
+            QWidget#toast {{
+                background-color: {background_color};
+                border-radius: 6px;
+            }}
+        """)
+        layout = QHBoxLayout(toast)
+        layout.setContentsMargins(12, 8, 12, 8)
+        label = QLabel(message)
+        label.setStyleSheet(f'background-color: {background_color};')
+        layout.addWidget(label)
+        toast.adjustSize()
+
+        parent_width = self._parent.width()
+        x = parent_width - toast.width() - self.MARGIN
+        y = self.MARGIN
+        toast.move(parent_width, y)
+        toast.show()
+        toast.raise_()
+
+        self._active_toast = toast
+        self._slide_to(
+            toast,
+            x,
+            y,
+            on_finished=lambda: QTimer.singleShot(
+                duration_ms, lambda: self._dismiss(toast)
+            ),
+        )
+
+    def _slide_to(
+        self,
+        toast: QWidget,
+        x: int,
+        y: int,
+        on_finished=None,
+    ) -> None:
+        animation = QPropertyAnimation(toast, b'pos')
+        animation.setDuration(self.SLIDE_MS)
+        animation.setStartValue(toast.pos())
+        animation.setEndValue(QPoint(x, y))
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        if on_finished is not None:
+            animation.finished.connect(on_finished)
+        animation.start()
+        self._active_animation = animation
+
+    def _dismiss(self, toast: QWidget) -> None:
+        if self._active_toast is not toast:
+            return
+        animation = QPropertyAnimation(toast, b'pos')
+        animation.setDuration(self.SLIDE_MS)
+        animation.setStartValue(toast.pos())
+        animation.setEndValue(QPoint(self._parent.width(), toast.y()))
+        animation.setEasingCurve(QEasingCurve.Type.InCubic)
+        animation.finished.connect(toast.deleteLater)
+        animation.finished.connect(self._clear_active_toast)
+        animation.start()
+        self._active_animation = animation
+
+    def _clear_active_toast(self) -> None:
+        self._active_toast = None
+        self._active_animation = None
 
 
 def label_with_subtitle(title: str, subtitle: str) -> QWidget:
@@ -346,6 +439,7 @@ class ScheduleTableView(QTableView):
         super().__init__(parent)
         self._regions: list[SelectionRegion] = []
         self._drag_anchor: tuple[int, int] | None = None
+        self._drag_preview: SelectionRegion | None = None
         self.setSelectionMode(QTableView.NoSelection)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -381,6 +475,26 @@ class ScheduleTableView(QTableView):
             return None
         return min(df_cols), max(df_cols) + 1
 
+    def _region_from_model_cells(
+        self, r0: int, c0: int, r1: int, c1: int
+    ) -> SelectionRegion | None:
+        col_range = self._df_col_range_from_model_cols(c0, c1)
+        if col_range is None:
+            return None
+        from_col, upto_col = col_range
+        return SelectionRegion(
+            min(r0, r1),
+            max(r0, r1) + 1,
+            from_col,
+            upto_col,
+        )
+
+    def _set_drag_preview(self, region: SelectionRegion | None) -> None:
+        if region == self._drag_preview:
+            return
+        self._drag_preview = region
+        self.viewport().update()
+
     def _on_column_header_clicked(self, column: int) -> None:
         if self.model() is None or self.model().rowCount() == 0:
             return
@@ -393,6 +507,7 @@ class ScheduleTableView(QTableView):
         self.set_regions([region])
 
     def mousePressEvent(self, event):
+        self._drag_preview = None
         index = self.indexAt(event.position().toPoint())
         if index.isValid():
             self._drag_anchor = (index.row(), index.column())
@@ -400,32 +515,39 @@ class ScheduleTableView(QTableView):
             self._drag_anchor = None
         super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event):
+        if self._drag_anchor is not None and event.buttons() & Qt.LeftButton:
+            index = self.indexAt(event.position().toPoint())
+            if index.isValid():
+                r0, c0 = self._drag_anchor
+                self._set_drag_preview(
+                    self._region_from_model_cells(
+                        r0, c0, index.row(), index.column()
+                    )
+                )
+            else:
+                self._set_drag_preview(None)
+        super().mouseMoveEvent(event)
+
     def mouseReleaseEvent(self, event):
         if self._drag_anchor is not None:
             end_index = self.indexAt(event.position().toPoint())
             if end_index.isValid():
                 r0, c0 = self._drag_anchor
-                r1, c1 = end_index.row(), end_index.column()
-                col_range = self._df_col_range_from_model_cols(c0, c1)
-                if col_range is None:
-                    self._drag_anchor = None
-                    super().mouseReleaseEvent(event)
-                    return
-                from_col, upto_col = col_range
-                region = SelectionRegion(
-                    min(r0, r1),
-                    max(r0, r1) + 1,
-                    from_col,
-                    upto_col,
+                region = self._region_from_model_cells(
+                    r0, c0, end_index.row(), end_index.column()
                 )
-                if event.modifiers() & Qt.ControlModifier:
-                    regions = self._regions + [region]
-                    if len(regions) > 2:
-                        regions = regions[-2:]
-                    self.set_regions(regions)
-                else:
-                    self.set_regions([region])
+                if region is not None:
+                    if event.modifiers() & Qt.ControlModifier:
+                        regions = self._regions + [region]
+                        if len(regions) > 2:
+                            regions = regions[-2:]
+                        self.set_regions(regions)
+                    else:
+                        self.set_regions([region])
         self._drag_anchor = None
+        self._drag_preview = None
+        self.viewport().update()
         super().mouseReleaseEvent(event)
 
     def _schedule_controller(self):
@@ -462,28 +584,33 @@ class ScheduleTableView(QTableView):
             return
         super().keyPressEvent(event)
 
+    def _paint_region_outline(self, painter: QPainter, region: SelectionRegion) -> None:
+        top_left = self.visualRect(
+            self.model().index(
+                region.from_row, ScheduleTableModel.model_column_index(region.from_col)
+            )
+        )
+        bottom_right = self.visualRect(
+            self.model().index(
+                region.upto_row - 1,
+                ScheduleTableModel.model_column_index(region.upto_col - 1),
+            )
+        )
+        rect = top_left.united(bottom_right)
+        painter.drawRect(rect.adjusted(0, 0, -1, -1))
+
     def paintEvent(self, event):
         super().paintEvent(event)
-        if not self._regions:
+        regions = list(self._regions)
+        if self._drag_preview is not None:
+            regions.append(self._drag_preview)
+        if not regions:
             return
 
         painter = QPainter(self.viewport())
-        pen = QPen(QColor('#2563eb'), 2)
-        painter.setPen(pen)
-        for region in self._regions:
-            top_left = self.visualRect(
-                self.model().index(
-                    region.from_row, ScheduleTableModel.model_column_index(region.from_col)
-                )
-            )
-            bottom_right = self.visualRect(
-                self.model().index(
-                    region.upto_row - 1,
-                    ScheduleTableModel.model_column_index(region.upto_col - 1),
-                )
-            )
-            rect = top_left.united(bottom_right)
-            painter.drawRect(rect.adjusted(0, 0, -1, -1))
+        painter.setPen(QPen(QColor('#2563eb'), 2))
+        for region in regions:
+            self._paint_region_outline(painter, region)
         painter.end()
 
 
@@ -938,6 +1065,7 @@ class ScheduleApp(QMainWindow):
         right.addLayout(bottom_row)
 
         self.load_notes()
+        self.toast_manager = ToastManager(root)
 
     def _destroy_schedule_widgets(self) -> None:
         if self.inputs is not None:
@@ -1158,6 +1286,7 @@ class ScheduleApp(QMainWindow):
 
     def _apply_balance_rules(self, rules):
         self._perform_with_undo(lambda: self.auto_balance_shifts(rules))
+        self.toast_manager.show('rules applied', background_color=primary_button_color)
 
     def auto_balance_shifts(self, balance_rules=None):
         balance_rules = balance_rules or default_balance_rules()
@@ -1240,14 +1369,19 @@ class ScheduleApp(QMainWindow):
             file.write(self.notes_text_box.toPlainText())
 
     def create_schedule(self):
+        self.paid_workers = self.paid_workers_entry.toPlainText().split(', ')
+        self.volunteers = self.volunteers_entry.toPlainText().split(', ')
+        all_names = [name for name in self.paid_workers + self.volunteers if name]
+        if len(all_names) != len(set(all_names)):
+            self.toast_manager.show('duplicate names', background_color=secondary_button_color)
+            return
+
         if self.sheet_frame.has_schedule():
             self.action_history_stack = []
             self.action_redo_stack = []
             self.update_labels()
             self._destroy_schedule_widgets()
 
-        self.paid_workers = self.paid_workers_entry.toPlainText().split(', ')
-        self.volunteers = self.volunteers_entry.toPlainText().split(', ')
         is_late_lunch = self.lunch_timing_group.checkedId()
         is_hour_lunch = self.hour_lunch_group.checkedId()
 
