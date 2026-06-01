@@ -840,6 +840,11 @@ class InputFrame(QWidget):
         )
         grid.addWidget(self.swap_button, 1, 2, 1, 1)
 
+        self.delete_column_button = QPushButton('Delete Column')
+        self.delete_column_button.setObjectName('secondaryBtn')
+        self.delete_column_button.clicked.connect(controller.delete_column_clicked)
+        grid.addWidget(self.delete_column_button, 2, 2, 1, 1)
+
         self.balance_button = QPushButton('Balance')
         self.balance_button.setObjectName('primaryBtn')
         self.balance_button.clicked.connect(controller.show_balance_rules_dialog)
@@ -1272,6 +1277,48 @@ class ScheduleApp(QMainWindow):
         self.df.loc[sel1_time_start:sel1_time_end, sel1_workers] = sel2_df
         self.update_sheet()
         self.update_labels()
+
+    def delete_column_clicked(self) -> None:
+        removed_shifts = self._perform_with_undo(self.delete_column)
+        if removed_shifts:
+            shift_list = ', '.join(sorted(removed_shifts))
+            self.toast_manager.show(
+                f'standard shifts removed: {shift_list}',
+                background_color=secondary_button_color,
+                duration_ms=3000,
+            )
+
+    def delete_column(self) -> set[str] | None:
+        if not self.sheet_frame.has_schedule():
+            return None
+        region = self._primary_sheet_region()
+        if region is None:
+            QMessageBox.warning(
+                self, 'Delete Column', 'Please select a column to delete.'
+            )
+            return None
+        workers = region.column_names(self.df)
+        if not workers:
+            return None
+
+        standard_floor_shift_set = set(STANDARD_FLOOR_SHIFTS)
+        removed_shifts: set[str] = set()
+        for worker in workers:
+            present = set(self.df[worker].dropna().unique())
+            removed_shifts |= present & standard_floor_shift_set
+
+        self.df = self.df.drop(columns=workers)
+        for worker in workers:
+            if worker in self.paid_workers:
+                self.paid_workers.remove(worker)
+            if worker in self.volunteers:
+                self.volunteers.remove(worker)
+        self.paid_workers_entry.setPlainText(', '.join(self.paid_workers))
+        self.volunteers_entry.setPlainText(', '.join(self.volunteers))
+
+        self.sheet_frame.table_view.set_regions([])
+        self.update_sheet()
+        return removed_shifts
 
     def show_balance_rules_dialog(self):
         if self.df.empty:
