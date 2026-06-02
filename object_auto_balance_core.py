@@ -180,6 +180,25 @@ def format_balance_rule_line(index, rule):
     return f'{flag}  {index + 1}.  {rule.description}'
 
 
+def is_standard_shift_covered(df: pd.DataFrame, shift: str) -> bool:
+    """Return True when shift appears in every required time slot."""
+    if df.empty or shift not in SHIFT_INFO:
+        return False
+    if SHIFT_INFO[shift]['isHour']:
+        for index in df.index[::2]:
+            pos = df.index.get_loc(index)
+            if pos + 1 >= len(df.index):
+                return False
+            next_index = df.index[pos + 1]
+            if shift not in df.loc[index].values or shift not in df.loc[next_index].values:
+                return False
+        return True
+    for curr_row in df.index:
+        if shift not in df.loc[curr_row].values:
+            return False
+    return True
+
+
 def shift_background_color(shift) -> str | None:
     """Return QColor-ready hex for a shift, or None for empty/default cells."""
     if pd.isna(shift) or shift == '':

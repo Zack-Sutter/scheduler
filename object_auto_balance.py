@@ -18,6 +18,7 @@ from PySide6.QtCore import (
     QModelIndex,
     QPoint,
     QPropertyAnimation,
+    QRect,
     Qt,
     QTimer,
     Signal,
@@ -26,6 +27,7 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QCloseEvent,
+    QEnterEvent,
     QFontMetrics,
     QKeySequence,
     QPainter,
@@ -50,6 +52,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QSizePolicy,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTableView,
     QTextEdit,
     QVBoxLayout,
@@ -65,9 +69,13 @@ from object_auto_balance_core import (
     count_column_violations,
     default_balance_rules,
     format_balance_rule_line,
+    is_standard_shift_covered,
     shift_background_color,
     total_violations,
 )
+
+SHIFT_COVERAGE_ROLE = Qt.ItemDataRole.UserRole + 1
+SHIFT_COVERAGE_INDICATOR_WIDTH = 6
 
 primary_button_color = '#EDD863'
 primary_button_hover_color = '#E1D591'
@@ -221,6 +229,116 @@ class ToastManager:
     def _clear_active_toast(self) -> None:
         self._active_toast = None
         self._active_animation = None
+
+
+info_icon_color = subtitle_text_color
+info_tip_background_color = '#ffffff'
+info_tip_border_color = '#b0b0b0'
+
+
+class InfoTipManager:
+    SHOW_DELAY_MS = 400
+    MAX_TIP_WIDTH = 300
+
+    def __init__(self, parent: QWidget):
+        self._parent = parent
+        self._popup: QWidget | None = None
+        self._label: QLabel | None = None
+        self._anchor: QWidget | None = None
+        self._pending_text = ''
+        self._show_timer = QTimer()
+        self._show_timer.setSingleShot(True)
+        self._show_timer.timeout.connect(self._display_popup)
+
+    def create_icon(self, text: str, parent: QWidget | None = None) -> 'InfoIcon':
+        return InfoIcon(text, self, parent)
+
+    def request_show(self, icon: 'InfoIcon', text: str) -> None:
+        self._anchor = icon
+        self._pending_text = text
+        self._show_timer.start(self.SHOW_DELAY_MS)
+
+    def request_hide(self, icon: 'InfoIcon') -> None:
+        if self._anchor is icon:
+            self._show_timer.stop()
+            self._hide_popup()
+
+    def _ensure_popup(self) -> None:
+        if self._popup is not None:
+            return
+        popup = QFrame(self._parent, Qt.WindowType.ToolTip)
+        popup.setObjectName('infoTipPopup')
+        popup.setStyleSheet(f"""
+            QFrame#infoTipPopup {{
+                background-color: {info_tip_background_color};
+                border: 1px solid {info_tip_border_color};
+                border-radius: 4px;
+            }}
+        """)
+        layout = QHBoxLayout(popup)
+        layout.setContentsMargins(8, 6, 8, 6)
+        label = QLabel()
+        label.setWordWrap(True)
+        label.setMaximumWidth(self.MAX_TIP_WIDTH)
+        layout.addWidget(label)
+        self._popup = popup
+        self._label = label
+
+    def _display_popup(self) -> None:
+        if self._anchor is None or not self._pending_text:
+            return
+        self._ensure_popup()
+        assert self._popup is not None and self._label is not None
+        self._label.setText(self._pending_text)
+        self._popup.adjustSize()
+
+        anchor = self._anchor
+        global_pos = anchor.mapToGlobal(QPoint(0, anchor.height()))
+        popup = self._popup
+        popup.move(global_pos)
+        popup.show()
+        popup.raise_()
+
+    def _hide_popup(self) -> None:
+        if self._popup is not None:
+            self._popup.hide()
+        self._anchor = None
+        self._pending_text = ''
+
+
+class InfoIcon(QLabel):
+    ICON_SIZE = 16
+
+    def __init__(self, text: str, manager: InfoTipManager, parent: QWidget | None = None):
+        super().__init__('i', parent)
+        self._tip_text = text
+        self._manager = manager
+        self.setObjectName('infoIcon')
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setCursor(Qt.CursorShape.WhatsThisCursor)
+        self.setFixedSize(self.ICON_SIZE, self.ICON_SIZE)
+        self.setStyleSheet(f"""
+            QLabel#infoIcon {{
+                color: {info_icon_color};
+                background-color: transparent;
+                border: 1px solid {info_icon_color};
+                border-radius: {self.ICON_SIZE // 2}px;
+                font-size: {max(regular_font_size - 2, 8)}pt;
+                font-weight: bold;
+            }}
+            QLabel#infoIcon:hover {{
+                color: {text_color};
+                border-color: {text_color};
+            }}
+        """)
+
+    def enterEvent(self, event: QEnterEvent) -> None:
+        self._manager.request_show(self, self._tip_text)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        self._manager.request_hide(self)
+        super().leaveEvent(event)
 
 
 def label_with_subtitle(title: str, subtitle: str) -> QWidget:
@@ -731,6 +849,16 @@ class SheetFrame(QWidget):
         v_header.setStretchLastSection(False)
         self.table_view.hide()
         layout.addWidget(self.table_view)
+        self.schedule_info_icon = controller.info_tip_manager.create_icon(
+            'Hotkeys\n'
+            'Undo---Cmnd+Z\n'
+            'Redo---Cmnd+Shift+Z\n'
+            'Copy---Cmnd+C\n'
+            'Paste---Cmnd+V\n'
+            'Cut---Cmnd+X\n',
+            parent=self.table_view,
+        )
+        self.schedule_info_icon.hide()
 
     def has_schedule(self) -> bool:
         return self._has_schedule
@@ -739,6 +867,8 @@ class SheetFrame(QWidget):
         self._has_schedule = True
         self.blank_panel.hide()
         self.table_view.show()
+        self.schedule_info_icon.show()
+        self._position_schedule_info_icon()
 
     def set_frame_size(self, width: int, height: int) -> None:
         self._frame_width = width
@@ -798,6 +928,22 @@ class SheetFrame(QWidget):
         view.verticalHeader().resizeSections()
         view.horizontalScrollBar().setValue(0)
         view.verticalScrollBar().setValue(0)
+        self._position_schedule_info_icon()
+
+    def _position_schedule_info_icon(self) -> None:
+        if not self._has_schedule:
+            return
+        view = self.table_view
+        v_header = view.verticalHeader()
+        h_header = view.horizontalHeader()
+        corner_w = max(v_header.width(), 1)
+        corner_h = max(h_header.height(), 1)
+        icon_size = min(corner_w, corner_h, InfoIcon.ICON_SIZE + 4) - 2
+        icon_size = max(icon_size, 12)
+        icon = self.schedule_info_icon
+        icon.setFixedSize(icon_size, icon_size)
+        icon.move(1, 1)
+        icon.raise_()
 
     def update_sheet(self):
         if not self._has_schedule:
@@ -849,6 +995,27 @@ class InputFrame(QWidget):
         self.balance_button.setObjectName('primaryBtn')
         self.balance_button.clicked.connect(controller.show_balance_rules_dialog)
         grid.addWidget(self.balance_button, 1, 3, 1, 1)
+
+
+class ShiftCoverageDelegate(QStyledItemDelegate):
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        content_option = QStyleOptionViewItem(option)
+        content_option.rect = option.rect.adjusted(
+            0, 0, -SHIFT_COVERAGE_INDICATOR_WIDTH, 0
+        )
+        super().paint(painter, content_option, index)
+
+        covered = index.data(SHIFT_COVERAGE_ROLE)
+        if covered is None:
+            return
+        color = QColor(enable_button_color if covered else secondary_button_color)
+        indicator = QRect(
+            option.rect.right() - SHIFT_COVERAGE_INDICATOR_WIDTH + 1,
+            option.rect.top() + 1,
+            SHIFT_COVERAGE_INDICATOR_WIDTH - 1,
+            option.rect.height() - 2,
+        )
+        painter.fillRect(indicator, color)
 
 
 class NonStandardShiftFrame(QFrame):
@@ -918,13 +1085,30 @@ class StandardShiftFrame(QFrame):
         self.controller = controller
         self.setFrameStyle(QFrame.Box | QFrame.Plain)
         grid = QGridLayout(self)
-        grid.addWidget(label_with_subtitle('Add standard shift', 'one item per row'), 0, 0)
+        header = QWidget()
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(4, 4, 4, 0)
+        header_layout.setSpacing(4)
+        header_layout.addWidget(
+            controller.info_tip_manager.create_icon('green bar = covered all day', parent=header),
+            alignment=Qt.AlignmentFlag.AlignTop,
+        )
+        header_layout.addWidget(
+            label_with_subtitle('Add standard shift', 'one item per row')
+        )
+        grid.addWidget(header, 0, 0)
         self.list_widget = QListWidget()
+        self.list_widget.setItemDelegate(ShiftCoverageDelegate(self.list_widget))
         self.list_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         fm = QFontMetrics(self.list_widget.font())
-        list_width = fm.horizontalAdvance('0' * 20) + 2 * self.list_widget.frameWidth() + 8
+        list_width = (
+            fm.horizontalAdvance('0' * 20)
+            + SHIFT_COVERAGE_INDICATOR_WIDTH
+            + 2 * self.list_widget.frameWidth()
+            + 8
+        )
         self.list_widget.setFixedWidth(list_width)
         for shift in STANDARD_FLOOR_SHIFTS:
             item = QListWidgetItem(shift)
@@ -940,6 +1124,19 @@ class StandardShiftFrame(QFrame):
         self.list_widget.setFixedHeight(list_widget_height)
         self.list_widget.itemClicked.connect(self.on_list_item_clicked)
         grid.addWidget(self.list_widget, 1, 0)
+        self.update_coverage_indicators()
+
+    def update_coverage_indicators(self) -> None:
+        has_schedule = self.controller.sheet_frame.has_schedule()
+        df = self.controller.df
+        for row in range(self.list_widget.count()):
+            item = self.list_widget.item(row)
+            if has_schedule and not df.empty:
+                covered = is_standard_shift_covered(df, item.text())
+            else:
+                covered = False
+            item.setData(SHIFT_COVERAGE_ROLE, covered)
+        self.list_widget.viewport().update()
 
     def on_list_item_clicked(self, item: QListWidgetItem):
         self.controller._perform_with_undo(
@@ -958,6 +1155,7 @@ class ScheduleApp(QMainWindow):
         self.action_history_stack = []
         self.action_redo_stack = []
         self.df = pd.DataFrame()
+        self.info_tip_manager = InfoTipManager(self)
         self.sheet_frame = SheetFrame(self)
         self.sheet_frame.set_frame_size(
             SheetFrame.FRAME_WIDTH, SheetFrame.FRAME_HEIGHT
@@ -1079,6 +1277,8 @@ class ScheduleApp(QMainWindow):
 
     def update_sheet(self):
         self.sheet_frame.update_sheet()
+        if self.inputs is not None:
+            self.inputs.standard_frame.update_coverage_indicators()
 
     def get_sheet_selection(self) -> dict | None:
         if not self.sheet_frame.has_schedule():
@@ -1468,6 +1668,7 @@ class ScheduleApp(QMainWindow):
             if item.widget():
                 item.widget().deleteLater()
         self.inputs_layout.addWidget(self.inputs)
+        self.inputs.standard_frame.update_coverage_indicators()
 
         self.update_labels()
 
