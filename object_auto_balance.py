@@ -700,6 +700,10 @@ class ScheduleTableView(QTableView):
             controller.redo()
             event.accept()
             return
+        if event.matches(QKeySequence.Bold):
+            controller._perform_with_undo(controller.swap)
+            event.accept()
+            return
         super().keyPressEvent(event)
 
     def _paint_region_outline(self, painter: QPainter, region: SelectionRegion) -> None:
@@ -822,11 +826,15 @@ class SheetFrame(QWidget):
         self._frame_width = self.FRAME_WIDTH
         self._frame_height = self.FRAME_HEIGHT
         self._has_schedule = False
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self.setMinimumWidth(self.FRAME_WIDTH)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.blank_panel = QWidget()
         self.blank_panel.setStyleSheet(f'background-color: {text_field_color};')
-        layout.addWidget(self.blank_panel)
+        layout.addWidget(self.blank_panel, stretch=1)
         self.model = ScheduleTableModel(self)
         self.table_view = ScheduleTableView(self)
         self.table_view.setObjectName('scheduleTable')
@@ -848,14 +856,15 @@ class SheetFrame(QWidget):
         v_header.setMinimumSectionSize(1)
         v_header.setStretchLastSection(False)
         self.table_view.hide()
-        layout.addWidget(self.table_view)
+        layout.addWidget(self.table_view, stretch=1)
         self.schedule_info_icon = controller.info_tip_manager.create_icon(
             'Hotkeys\n'
             'Undo---Cmnd+Z\n'
             'Redo---Cmnd+Shift+Z\n'
             'Copy---Cmnd+C\n'
             'Paste---Cmnd+V\n'
-            'Cut---Cmnd+X\n',
+            'Cut---Cmnd+X\n'
+            'Swap---Cmnd+B\n',
             parent=self.table_view,
         )
         self.schedule_info_icon.hide()
@@ -873,7 +882,8 @@ class SheetFrame(QWidget):
     def set_frame_size(self, width: int, height: int) -> None:
         self._frame_width = width
         self._frame_height = height
-        self.setFixedSize(width, height)
+        self.setMinimumWidth(width)
+        self.setFixedHeight(height)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1145,6 +1155,8 @@ class StandardShiftFrame(QFrame):
 
 
 class ScheduleApp(QMainWindow):
+    LEFT_PANEL_MAX_WIDTH = 280
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle('MoMath Automatic Scheduler')
@@ -1169,10 +1181,15 @@ class ScheduleApp(QMainWindow):
         self.setCentralWidget(root)
         main_layout = QHBoxLayout(root)
 
-        left = QVBoxLayout()
+        left_panel = QWidget()
+        left_panel.setMaximumWidth(self.LEFT_PANEL_MAX_WIDTH)
+        left_panel.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Expanding
+        )
+        left = QVBoxLayout(left_panel)
         left.setContentsMargins(6, 6, 6, 6)
         left.setSpacing(6)
-        main_layout.addLayout(left, stretch=1)
+        main_layout.addWidget(left_panel, stretch=0)
 
         paid_worker_header = label_with_subtitle('Paid workers', 'comma separated')
         paid_worker_header.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -1200,7 +1217,7 @@ class ScheduleApp(QMainWindow):
         lunch_row = QHBoxLayout(lunch_frame)
 
         timing_col = QVBoxLayout()
-        lunch_label = QLabel('Early or late lunches today?')
+        lunch_label = QLabel('Lunch times?')
         lunch_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         timing_col.addWidget(lunch_label)
         self.lunch_timing_group = QButtonGroup(self)
