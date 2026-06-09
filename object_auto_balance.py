@@ -1633,7 +1633,10 @@ class ScheduleApp(QMainWindow):
             file.write(self.notes_text_box.toPlainText())
 
     def create_schedule(self):
-        self.paid_workers = self.paid_workers_entry.toPlainText().split(', ')
+        paid_workers_raw = self.paid_workers_entry.toPlainText()
+        zachk_easter_egg_pattern = r"\b[Zz]ac[kh]?\b"
+        paid_workers_text = re.sub(zachk_easter_egg_pattern, 'Zachk', paid_workers_raw) ################## << easter egg pattern
+        self.paid_workers = paid_workers_text.split(', ')
         self.volunteers = self.volunteers_entry.toPlainText().split(', ')
         all_names = [name for name in self.paid_workers + self.volunteers if name]
         if len(all_names) != len(set(all_names)):
