@@ -50,6 +50,7 @@ NONSTANDARD_SHIFTS = [
 SWAPPABLE_FLOOR_SHIFTS = [
     'Trike', 'CORO', 'Gallery', 'Front', 'Back', 'Float 0', 'Float 1', 'ENCA',
 ]
+DIRECT_SWAP_SHIFTS = ['Trike', 'Gallery', 'Security']
 
 if sys.platform == 'win32':
     RES_FILE_NAME = f'momath_schedule_{datetime.date.today()}.xlsx'
@@ -138,12 +139,45 @@ class NoTrikeAdjacentLunchRule(ShiftBalanceRule):
         return violations
 
 
+class NoDirectSwapShiftsRule(ShiftBalanceRule):
+    name = 'no_direct_swap_shifts'
+    description = 'No direct swaps between Trike/Gallery/Security.'
+
+    def _count(self, col_series):
+        values = col_series.tolist()
+        violations = 0
+        for i in range(len(values) - 1):
+            val, next_val = values[i], values[i + 1]
+            if (
+                val in DIRECT_SWAP_SHIFTS
+                and next_val in DIRECT_SWAP_SHIFTS
+                and val != next_val
+            ):
+                violations += 1
+        return violations
+
+
+def direct_swap_blocked(rules, val1, val2):
+    """True when auto-balance must not swap two different DIRECT_SWAP_SHIFTS."""
+    if pd.isna(val1) or pd.isna(val2):
+        return False
+    if val1 == val2:
+        return False
+    if val1 not in DIRECT_SWAP_SHIFTS or val2 not in DIRECT_SWAP_SHIFTS:
+        return False
+    for rule in rules:
+        if rule.name == 'no_direct_swap_shifts' and rule.enabled:
+            return True
+    return False
+
+
 def default_balance_rules():
     return [
         NoDuplicateConsecutiveRule(),
         NoTrikeCoroAdjacencyRule(),
         TrikeCoroBefore1pmRule(),
         NoTrikeAdjacentLunchRule(),
+        NoDirectSwapShiftsRule(),
     ]
 
 

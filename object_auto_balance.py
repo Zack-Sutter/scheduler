@@ -68,6 +68,7 @@ from object_auto_balance_core import (
     SWAPPABLE_FLOOR_SHIFTS,
     count_column_violations,
     default_balance_rules,
+    direct_swap_blocked,
     format_balance_rule_line,
     is_standard_shift_covered,
     shift_background_color,
@@ -1263,7 +1264,11 @@ class ScheduleApp(QMainWindow):
         self.schedule_area = QWidget()
         schedule_layout = QVBoxLayout(self.schedule_area)
         schedule_layout.setContentsMargins(0, 0, 0, 0)
-        schedule_layout.addWidget(self.sheet_frame, stretch=1)
+        schedule_layout.addWidget(
+            self.sheet_frame,
+            0,
+            Qt.AlignmentFlag.AlignTop)
+        schedule_layout.addStretch(1)
         right.addWidget(self.schedule_area, stretch=3)
 
         self.inputs_host = QWidget()
@@ -1581,6 +1586,8 @@ class ScheduleApp(QMainWindow):
                         candidate_value = self.df.at[row_label, other_col_name]
                         candidate_is_nan = pd.isna(candidate_value)
                         if not candidate_is_nan and candidate_value not in SWAPPABLE_FLOOR_SHIFTS:
+                            continue
+                        if direct_swap_blocked(balance_rules, cell_value, candidate_value):
                             continue
                         sim_df = self.df.copy()
                         sim_df.at[row_label, col_name] = candidate_value
