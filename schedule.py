@@ -57,6 +57,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QTableView,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -96,6 +97,28 @@ text_field_color = '#c6c6c6'
 sheet_grid_line_color = '#b0b0b0'
 regular_font_family = "Georgia"
 regular_font_size = 11
+
+NOTES_TAB_LABELS = ('G', 'S', 'M', 'T', 'W', 'T', 'F', 'S')
+NOTES_TAB_TOOLTIPS = (
+    'General', 'Sunday', 'Monday', 'Tuesday',
+    'Wednesday', 'Thursday', 'Friday', 'Saturday',
+)
+NOTES_SECTION_COUNT = 8
+NOTES_SEPARATOR_RE = re.compile(r'^§§§\s*$', re.MULTILINE)
+
+
+def split_daily_notes(raw: str) -> list[str]:
+    parts = [p.strip('\n') for p in NOTES_SEPARATOR_RE.split(raw)]
+    while len(parts) > NOTES_SECTION_COUNT and not parts[-1].strip():
+        parts.pop()
+    while len(parts) < NOTES_SECTION_COUNT:
+        parts.append('')
+    return parts[:NOTES_SECTION_COUNT]
+
+
+def merge_daily_notes(sections: list[str]) -> str:
+    return '\n§§§\n'.join(sections)
+
 
 APP_STYLESHEET = f"""
 * {{
@@ -148,6 +171,18 @@ QPushButton#disableBtn {{
 }}
 QPushButton#disableBtn:hover {{
     background-color: {disable_button_hover_color};
+}}
+QTabWidget::pane {{
+    border: 1px solid {sheet_grid_line_color};
+    background-color: {text_field_color};
+}}
+QTabBar::tab {{
+    background-color: {frame_color};
+    padding: 4px 8px;
+    margin-right: 2px;
+}}
+QTabBar::tab:selected {{
+    background-color: {text_field_color};
 }}
 """
 
@@ -1333,11 +1368,17 @@ class ScheduleApp(QMainWindow):
         create_btn.clicked.connect(self.create_schedule)
         left.addWidget(create_btn)
 
-        self.notes_text_box = QTextEdit()
-        self.notes_text_box.setSizePolicy(
+        self.notes_tabs = QTabWidget()
+        self.notes_tabs.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
         )
-        left.addWidget(self.notes_text_box, stretch=1)
+        self.notes_edits: list[QTextEdit] = []
+        for label, tooltip in zip(NOTES_TAB_LABELS, NOTES_TAB_TOOLTIPS):
+            edit = QTextEdit()
+            edit.setToolTip(tooltip)
+            self.notes_edits.append(edit)
+            self.notes_tabs.addTab(edit, label)
+        left.addWidget(self.notes_tabs, stretch=1)
 
         right = QVBoxLayout()
         main_layout.addLayout(right, stretch=2)
@@ -1761,20 +1802,26 @@ class ScheduleApp(QMainWindow):
         self.inputs.redo_button.setText(f'Redo ({redo_len})')
 
     def load_notes(self):
+        def set_sections(sections: list[str]) -> None:
+            for edit, section in zip(self.notes_edits, sections):
+                edit.setPlainText(section)
+
         try:
-            with open('daily_notes.txt') as file:
-                self.notes_text_box.setPlainText(file.read())
+            with open('daily_notes.txt', encoding='utf-8') as file:
+                set_sections(split_daily_notes(file.read()))
         except FileNotFoundError:
-            self.notes_text_box.setPlainText(
+            set_sections([
                 'Error: File not found.\nPlease make a file named daily_notes.txt and\n'
-                'place it in the same folder as schedule.py'
-            )
+                'place it in the same folder as schedule.py',
+                *([''] * (NOTES_SECTION_COUNT - 1)),
+            ])
         except Exception as e:
-            self.notes_text_box.setPlainText(f'An error occurred: {e}')
+            set_sections([f'An error occurred: {e}', *([''] * (NOTES_SECTION_COUNT - 1))])
 
     def save_notes(self):
-        with open('daily_notes.txt', 'w') as file:
-            file.write(self.notes_text_box.toPlainText())
+        sections = [edit.toPlainText() for edit in self.notes_edits]
+        with open('daily_notes.txt', 'w', encoding='utf-8') as file:
+            file.write(merge_daily_notes(sections))
 
     def create_schedule(self):
         paid_workers_raw = self.paid_workers_entry.toPlainText()
