@@ -28,6 +28,7 @@ from PySide6.QtGui import (
     QColor,
     QCloseEvent,
     QEnterEvent,
+    QFont,
     QFontMetrics,
     QKeySequence,
     QPainter,
@@ -92,11 +93,13 @@ text_color = '#000000'
 subtitle_text_color = '#666666'
 text_field_color = '#c6c6c6'
 sheet_grid_line_color = '#b0b0b0'
+regular_font_family = "Georgia"
 regular_font_size = 11
 
 APP_STYLESHEET = f"""
 * {{
     color: {text_color};
+    font-family: {regular_font_family};
     font-size: {regular_font_size}pt;
 }}
 QMainWindow, QWidget#centralRoot, QDialog {{
@@ -971,6 +974,14 @@ class SheetFrame(QWidget):
 
 
 class InputFrame(QWidget):
+    @staticmethod
+    def _configure_action_button(button: QPushButton) -> None:
+        button.setFixedHeight(button.sizeHint().height() * 2)
+        button.setSizePolicy(
+            button.sizePolicy().horizontalPolicy(),
+            QSizePolicy.Policy.Fixed,
+        )
+
     def __init__(self, controller: 'ScheduleApp'):
         super().__init__()
         self.controller = controller
@@ -1006,6 +1017,16 @@ class InputFrame(QWidget):
         self.balance_button.setObjectName('primaryBtn')
         self.balance_button.clicked.connect(controller.show_balance_rules_dialog)
         grid.addWidget(self.balance_button, 1, 3, 1, 1)
+
+    def configure_action_buttons(self) -> None:
+        for action_button in (
+            self.undo_button,
+            self.redo_button,
+            self.swap_button,
+            self.delete_column_button,
+            self.balance_button,
+        ):
+            self._configure_action_button(action_button)
 
 
 class ShiftCoverageDelegate(QStyledItemDelegate):
@@ -1695,6 +1716,7 @@ class ScheduleApp(QMainWindow):
             if item.widget():
                 item.widget().deleteLater()
         self.inputs_layout.addWidget(self.inputs)
+        self.inputs.configure_action_buttons()
         self.inputs.standard_frame.update_coverage_indicators()
 
         self.update_labels()
@@ -1805,6 +1827,7 @@ class ScheduleApp(QMainWindow):
 
 def show_ui() -> None:
     app = QApplication(sys.argv)
+    app.setFont(QFont(regular_font_family, regular_font_size))
     app.setStyleSheet(APP_STYLESHEET)
     window = ScheduleApp()
     window.show()
