@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QButtonGroup,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFrame,
@@ -820,6 +821,59 @@ class BalanceRulesDialog(QDialog):
         self.accept()
 
 
+class AddColumnDialog(QDialog):
+    def __init__(self, parent, columns: list[str]):
+        super().__init__(parent)
+        self._name = ''
+        self._after_column = ''
+        self.setWindowTitle('Add Column')
+        self.setModal(True)
+        self.setMinimumWidth(350)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel('Worker name'))
+        self.name_entry = QLineEdit()
+        layout.addWidget(self.name_entry)
+
+        layout.addWidget(QLabel('Insert after'))
+        self.after_combo = QComboBox()
+        self.after_combo.addItems(columns)
+        layout.addWidget(self.after_combo)
+
+        buttons = QDialogButtonBox()
+        cancel_btn = QPushButton('Cancel')
+        cancel_btn.setObjectName('secondaryBtn')
+        cancel_btn.clicked.connect(self.reject)
+        add_btn = QPushButton('Add')
+        add_btn.setObjectName('primaryBtn')
+        add_btn.clicked.connect(self._accept)
+        buttons.addButton(cancel_btn, QDialogButtonBox.RejectRole)
+        buttons.addButton(add_btn, QDialogButtonBox.AcceptRole)
+        layout.addWidget(buttons)
+
+        self.setStyleSheet(APP_STYLESHEET)
+
+    def _accept(self) -> None:
+        name = self.name_entry.text().strip()
+        if not name:
+            QMessageBox.warning(self, 'Add Column', 'Please enter a worker name.')
+            return
+        existing = [
+            self.after_combo.itemText(i) for i in range(self.after_combo.count())
+        ]
+        if name in existing:
+            QMessageBox.warning(
+                self, 'Add Column', 'A column with that name already exists.'
+            )
+            return
+        self._name = name
+        self._after_column = self.after_combo.currentText()
+        self.accept()
+
+    def result(self) -> tuple[str, str]:
+        return self._name, self._after_column
+
+
 class SheetFrame(QWidget):
     FRAME_WIDTH = 975
     FRAME_HEIGHT = 365
@@ -1013,6 +1067,11 @@ class InputFrame(QWidget):
         self.delete_column_button.clicked.connect(controller.delete_column_clicked)
         grid.addWidget(self.delete_column_button, 2, 2, 1, 1)
 
+        self.add_column_button = QPushButton('Add Column')
+        self.add_column_button.setObjectName('primaryBtn')
+        self.add_column_button.clicked.connect(controller.add_column_clicked)
+        grid.addWidget(self.add_column_button, 2, 3, 1, 1)
+
         self.balance_button = QPushButton('Balance')
         self.balance_button.setObjectName('primaryBtn')
         self.balance_button.clicked.connect(controller.show_balance_rules_dialog)
@@ -1024,6 +1083,7 @@ class InputFrame(QWidget):
             self.redo_button,
             self.swap_button,
             self.delete_column_button,
+            self.add_column_button,
             self.balance_button,
         ):
             self._configure_action_button(action_button)
@@ -1411,8 +1471,6 @@ class ScheduleApp(QMainWindow):
     def _standard_half_hour_shift(self, shift, workers, start, end):
         failed_time_slots = []
         for curr_row in self.df.index[start:end]:
-            if shift in self.df.loc[curr_row].values:
-                continue
             nan_set = set(self.df.columns[self.df.loc[curr_row].isna()]) & set(workers)
             workers_with_nan = list(filter(lambda x: x in nan_set, workers))
             if workers_with_nan:
@@ -1429,8 +1487,6 @@ class ScheduleApp(QMainWindow):
         for index, _row in self.df.iloc[start:end:2].iterrows():
             pos = self.df.index.get_loc(index)
             next_index = self.df.index[pos + 1]
-            if shift in self.df.loc[index].values and shift in self.df.loc[next_index].values:
-                continue
             workers_with_nan = (
                 set(self.df.columns[self.df.iloc[pos].isna()])
                 & set(self.df.columns[self.df.iloc[pos + 1].isna()])
@@ -1440,10 +1496,8 @@ class ScheduleApp(QMainWindow):
                 worker_to_assign = next(w for w in workers if w in workers_with_nan)
                 workers.remove(worker_to_assign)
                 workers.append(worker_to_assign)
-                if shift not in self.df.loc[index].values:
-                    self.df.at[index, worker_to_assign] = shift
-                if shift not in self.df.loc[next_index].values:
-                    self.df.at[next_index, worker_to_assign] = shift
+                self.df.at[index, worker_to_assign] = shift
+                self.df.at[next_index, worker_to_assign] = shift
             if shift not in self.df.loc[index].values:
                 failed_time_slots.append(index)
             if shift not in self.df.loc[index].values:
@@ -1461,12 +1515,41 @@ class ScheduleApp(QMainWindow):
             print('No changes detected. No state saved')
         return result
 
+    def _sync_worker_lists_from_columns(self, previous_columns: list[str]) -> None:
+        current_columns = list(self.df.columns)
+        if len(previous_columns) == len(current_columns):
+            return
+
+        previous_set = set(previous_columns)
+        current_set = set(current_columns)
+
+        for name in previous_set - current_set:
+            if name in self.paid_workers:
+                self.paid_workers.remove(name)
+            if name in self.volunteers:
+                self.volunteers.remove(name)
+
+        for name in current_set - previous_set:
+            index = current_columns.index(name)
+            if index < len(self.paid_workers):
+                self.paid_workers.insert(index, name)
+            elif self.volunteers and self.volunteers[0]:
+                volunteer_index = index - len(self.paid_workers)
+                self.volunteers.insert(volunteer_index, name)
+            else:
+                self.paid_workers.insert(index, name)
+
+        self.paid_workers_entry.setPlainText(', '.join(self.paid_workers))
+        self.volunteers_entry.setPlainText(', '.join(self.volunteers))
+
     def undo(self):
         if self.action_history_stack:
             last_state = self.action_history_stack.pop()
             current_state = self.df.copy()
             self.action_redo_stack.append(current_state)
+            previous_columns = list(current_state.columns)
             self.df = last_state
+            self._sync_worker_lists_from_columns(previous_columns)
             self.update_sheet()
         else:
             print('nothing left to undo.')
@@ -1477,7 +1560,9 @@ class ScheduleApp(QMainWindow):
             next_state = self.action_redo_stack.pop()
             current_state = self.df.copy()
             self.action_history_stack.append(current_state)
+            previous_columns = list(current_state.columns)
             self.df = next_state
+            self._sync_worker_lists_from_columns(previous_columns)
             self.update_sheet()
         else:
             print('nothing left to redo.')
@@ -1562,6 +1647,37 @@ class ScheduleApp(QMainWindow):
         self.sheet_frame.table_view.set_regions([])
         self.update_sheet()
         return removed_shifts
+
+    def add_column_clicked(self) -> None:
+        if not self.sheet_frame.has_schedule():
+            QMessageBox.warning(
+                self, 'Add Column', 'No schedule created yet.'
+            )
+            return
+        dialog = AddColumnDialog(self, columns=list(self.df.columns))
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        name, after_column = dialog.result()
+        self._perform_with_undo(self.add_column, name, after_column)
+
+    def add_column(self, name: str, after_column: str) -> None:
+        insert_idx = list(self.df.columns).index(after_column) + 1
+        self.df.insert(insert_idx, name, np.nan)
+
+        if after_column in self.paid_workers:
+            paid_index = self.paid_workers.index(after_column)
+            self.paid_workers.insert(paid_index + 1, name)
+        elif after_column in self.volunteers:
+            volunteer_index = self.volunteers.index(after_column)
+            self.volunteers.insert(volunteer_index + 1, name)
+        else:
+            self.paid_workers.append(name)
+
+        self.paid_workers_entry.setPlainText(', '.join(self.paid_workers))
+        self.volunteers_entry.setPlainText(', '.join(self.volunteers))
+
+        self._assign_lunch_for_worker(name)
+        self.update_sheet()
 
     def show_balance_rules_dialog(self):
         if self.df.empty:
@@ -1721,11 +1837,60 @@ class ScheduleApp(QMainWindow):
 
         self.update_labels()
 
-    def fill_lunch(self, is_late_lunch, is_hour_lunch):
+    def _base_lunch_times(self, is_late_lunch: int) -> list[str]:
         possible_lunch_times = ['11:00', '11:30', '12:00', '12:30', '01:00', '01:30']
         if is_late_lunch:
             possible_lunch_times = ['01:00', '01:30', '12:00', '12:30', '11:00', '11:30']
-        base_lunch_times = [time for time in possible_lunch_times if time in self.df.index]
+        return [time for time in possible_lunch_times if time in self.df.index]
+
+    def _workers_in_group(self, worker: str) -> list[str]:
+        if worker in self.volunteers:
+            return list(self.volunteers)
+        return list(self.paid_workers)
+
+    def _lunch_start_counts(
+        self, workers: list[str], base_lunch_times: list[str]
+    ) -> dict[str, int]:
+        counts = {time: 0 for time in base_lunch_times}
+        for w in workers:
+            if w not in self.df.columns:
+                continue
+            for time in base_lunch_times:
+                if self.df.at[time, w] == 'Lunch':
+                    counts[time] += 1
+        return counts
+
+    def _pick_lunch_start_time(
+        self, workers: list[str], base_lunch_times: list[str]
+    ) -> str:
+        counts = self._lunch_start_counts(workers, base_lunch_times)
+        return min(
+            base_lunch_times,
+            key=lambda time: (counts[time], base_lunch_times.index(time)),
+        )
+
+    def _write_lunch_at(
+        self, worker: str, lunch_start: str, is_hour_lunch: int
+    ) -> None:
+        pos = self.df.index.get_loc(lunch_start)
+        if is_hour_lunch:
+            self.df.at[self.df.index[pos], worker] = 'Lunch'
+            self.df.at[self.df.index[pos + 1], worker] = 'Lunch'
+        else:
+            self.df.at[self.df.index[pos], worker] = 'Lunch'
+
+    def _assign_lunch_for_worker(self, worker: str) -> None:
+        is_late_lunch = self.lunch_timing_group.checkedId()
+        is_hour_lunch = self.hour_lunch_group.checkedId()
+        base_lunch_times = self._base_lunch_times(is_late_lunch)
+        if not base_lunch_times:
+            return
+        group = self._workers_in_group(worker)
+        lunch_start = self._pick_lunch_start_time(group, base_lunch_times)
+        self._write_lunch_at(worker, lunch_start, is_hour_lunch)
+
+    def fill_lunch(self, is_late_lunch, is_hour_lunch):
+        base_lunch_times = self._base_lunch_times(is_late_lunch)
 
         worker_groups = [self.paid_workers]
         if self.volunteers[0]:
@@ -1736,17 +1901,15 @@ class ScheduleApp(QMainWindow):
             random.shuffle(workers)
             lunch_times = list(base_lunch_times)
             for worker in workers:
-                pos = self.df.index.get_loc(lunch_times[0])
+                lunch_start = lunch_times[0]
+                if not is_hour_lunch and lunch_start == '11:00':
+                    lunch_times.pop(0)
+                    lunch_start = lunch_times[0]
+                self._write_lunch_at(worker, lunch_start, is_hour_lunch)
                 if is_hour_lunch:
-                    self.df.at[self.df.index[pos], worker] = 'Lunch'
-                    self.df.at[self.df.index[pos + 1], worker] = 'Lunch'
                     lunch_times.append(lunch_times.pop(0))
                     lunch_times.append(lunch_times.pop(0))
                 else:
-                    if lunch_times[0] == '11:00':
-                        lunch_times.pop(0)
-                        pos = self.df.index.get_loc(lunch_times[0])
-                    self.df.at[self.df.index[pos], worker] = 'Lunch'
                     lunch_times.append(lunch_times.pop(0))
 
     def fill_dinner(self):
