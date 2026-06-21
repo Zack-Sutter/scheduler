@@ -1075,6 +1075,7 @@ class InputFrame(QWidget):
         super().__init__()
         self.controller = controller
         grid = QGridLayout(self)
+        grid.setSpacing(20)
         self.standard_frame = StandardShiftFrame(self, controller)
         self.nonstandard_frame = NonStandardShiftFrame(self, controller)
         grid.addWidget(self.standard_frame, 0, 0, 5, 1)
@@ -2039,6 +2040,7 @@ def show_ui() -> None:
     app = QApplication(sys.argv)
     app.setFont(QFont(regular_font_family, regular_font_size))
     app.setStyleSheet(APP_STYLESHEET)
+    app.setStyle('Fusion')
     window = ScheduleApp()
     window.show()
     sys.exit(app.exec())
