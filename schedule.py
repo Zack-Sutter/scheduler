@@ -75,7 +75,6 @@ from rules import (
     format_balance_rule_line,
     is_standard_shift_covered,
     shift_background_color,
-    total_violations,
 )
 
 SHIFT_COVERAGE_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -1729,6 +1728,13 @@ class ScheduleApp(QMainWindow):
                 'No schedule created yet. Create a blank schedule first.',
             )
             return
+        if self._primary_sheet_region() is None:
+            QMessageBox.warning(
+                self,
+                'Balance Error',
+                'Please select a region to balance.',
+            )
+            return
         balance_rules_dialog = BalanceRulesDialog(self, on_apply=self._apply_balance_rules)
         balance_rules_dialog.show()
 
@@ -1738,28 +1744,53 @@ class ScheduleApp(QMainWindow):
 
     def auto_balance_shifts(self, balance_rules=None):
         balance_rules = balance_rules or default_balance_rules()
+        region = self._primary_sheet_region()
+        if region is None:
+            QMessageBox.warning(
+                self,
+                'Balance Error',
+                'Please select a region to balance.',
+            )
+            return
+
+        col_names = region.column_names(self.df)
+        row_labels = self.df.index[region.from_row : region.upto_row]
+        zero_score = tuple(0 for _ in balance_rules)
+        region_df = self.df.loc[row_labels, col_names]
+
+        def region_violations(df):
+            totals = [0] * len(balance_rules)
+            for col_name in col_names:
+                col_slice = df.loc[row_labels, col_name]
+                for bucket, count in enumerate(
+                    count_column_violations(col_slice, balance_rules)
+                ):
+                    totals[bucket] += count
+            return tuple(totals)
+
         max_iterations = 100
 
         for _iteration in range(max_iterations):
             found_violation = False
-            for col_name, col_data in self.df.sample(frac=1,axis=1).items():
-                col_series = self.df[col_name]
-                for i in range(len(col_series)):
-                    cell_value = col_series.iloc[i]
-                    row_label = col_series.index[i]
+            for col_name in region_df.sample(frac=1, axis=1).columns:
+                col_slice = self.df.loc[row_labels, col_name]
+                for row_label in row_labels:
+                    cell_value = self.df.at[row_label, col_name]
                     is_nan = pd.isna(cell_value)
                     if not is_nan and cell_value not in SWAPPABLE_FLOOR_SHIFTS:
                         continue
-                    col_violations_before = count_column_violations(col_series, balance_rules)
-                    if col_violations_before == tuple(0 for _ in balance_rules):
+                    col_violations_before = count_column_violations(
+                        col_slice, balance_rules
+                    )
+                    if col_violations_before == zero_score:
                         continue
-                    temp = col_series.copy()
-                    temp.iloc[i] = np.nan
+                    temp = col_slice.copy()
+                    temp.at[row_label] = np.nan
                     if count_column_violations(temp, balance_rules) >= col_violations_before:
                         continue
                     best_swap_col = None
-                    best_score = total_violations(self.df, balance_rules)
-                    for other_col_name, other_col_data in self.df.sample(frac=1,axis=1).items():
+                    best_score = region_violations(self.df)
+                    for other_col_name in region_df.sample(frac=1, axis=1).columns:
                         if other_col_name == col_name:
                             continue
                         candidate_value = self.df.at[row_label, other_col_name]
@@ -1771,7 +1802,7 @@ class ScheduleApp(QMainWindow):
                         sim_df = self.df.copy()
                         sim_df.at[row_label, col_name] = candidate_value
                         sim_df.at[row_label, other_col_name] = cell_value
-                        score = total_violations(sim_df, balance_rules)
+                        score = region_violations(sim_df)
                         if score < best_score:
                             best_score = score
                             best_swap_col = other_col_name
