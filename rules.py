@@ -13,8 +13,7 @@ SHIFT_INFO = {
     'Front': {'color': '#9BC2E6', 'isHour': False},
     'Float': {'color': '#ffffff', 'isHour': False},
     'ENCA': {'color': '#FFD966', 'isHour': False},
-    'Head': {'color': '#ffd221', 'isHour': False},
-    'MOT': {'color': '#ffd221', 'isHour': False},
+    'TEST': {'color': '#03fcf8', 'isHour': False},
     'DIAR': {'color': '#b50934', 'isHour': False},
     'Lunch': {'color': '#7d7f7c', 'isHour': False},
     'Dinner': {'color': '#7d7f7c', 'isHour': False},
@@ -42,13 +41,13 @@ SHIFT_INFO = {
 }
 
 STANDARD_FLOOR_SHIFTS = [
-    'Security', 'Trike', 'CORO', 'Gallery', 'Front', 'Back', 'Float 0', 'Float 1', 'ENCA',
+    'Security', 'Trike', 'CORO', 'Gallery', 'Front', 'Back', 'Float 0', 'Float 1', 'ENCA', 'STST', 'TEST'
 ]
 NONSTANDARD_SHIFTS = [
     'Manager', 'GRGR', 'Project', 'MP', 'Pizza', 'Retail', 'Zoom'
 ]
 SWAPPABLE_FLOOR_SHIFTS = [
-    'Trike', 'CORO', 'Gallery', 'Front', 'Back', 'Float 0', 'Float 1', 'ENCA',
+    'Trike', 'CORO', 'Gallery', 'Front', 'Back', 'Float 0', 'Float 1', 'ENCA', 'STST', 'TEST'
 ]
 DIRECT_SWAP_SHIFTS = ['Trike', 'Gallery', 'Security']
 
