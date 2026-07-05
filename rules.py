@@ -40,6 +40,15 @@ SHIFT_INFO = {
     None: {'color': '#D3D3D3', 'isHour': False},
 }
 
+# greet
+# front front
+# front back
+# MASQ beaver run flow
+# Twist n roll
+# float 1 south
+# float 1 north 
+# ENCA --> Formula fun enca
+
 STANDARD_FLOOR_SHIFTS = [
     'Security', 'Trike', 'CORO', 'Gallery', 'Front', 'Back', 'Float 0', 'Float 1', 'ENCA', 'STST', 'TEST'
 ]
@@ -155,6 +164,22 @@ class NoDirectSwapShiftsRule(ShiftBalanceRule):
                 violations += 1
         return violations
 
+class MinimizeTrikeCoro(ShiftBalanceRule):
+    name = 'minimize_trike_coro'
+    description = 'Minimize Trike/CORO shifts per person.'
+    
+    def _count(self, col_series):
+        values = col_series.tolist()
+        violations = 1
+        for value in values:
+            if value in {'Trike', 'CORO'}:
+                violations *= 2
+        if violations == 1:
+            return 0
+        return violations
+
+
+
 
 def direct_swap_blocked(rules, val1, val2):
     """True when auto-balance must not swap two different DIRECT_SWAP_SHIFTS."""
@@ -174,9 +199,10 @@ def default_balance_rules():
     return [
         NoDuplicateConsecutiveRule(),
         NoTrikeCoroAdjacencyRule(),
-        TrikeCoroBefore1pmRule(),
         NoTrikeAdjacentLunchRule(),
         NoDirectSwapShiftsRule(),
+        MinimizeTrikeCoro(),
+        TrikeCoroBefore1pmRule()
     ]
 
 
