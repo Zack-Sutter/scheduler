@@ -13,12 +13,11 @@ SHIFT_INFO = {
     'Front': {'color': '#9BC2E6', 'isHour': False},
     'Float': {'color': '#ffffff', 'isHour': False},
     'ENCA': {'color': '#FFD966', 'isHour': False},
-    'TEST': {'color': '#03fcf8', 'isHour': False},
-    'DIAR': {'color': '#b50934', 'isHour': False},
+    'EL': {'color': '#03fcf8', 'isHour': False},
     'Lunch': {'color': '#7d7f7c', 'isHour': False},
     'Dinner': {'color': '#7d7f7c', 'isHour': False},
     'Security': {'color': '#00b1d2', 'isHour': True},
-    'Tickets': {'color': '#f6f9d4', 'isHour': True},
+    'Greet': {'color': '#f6f9d4', 'isHour': True},
     'FLOAT': {'color': '#D3D3D3', 'isHour': False},
     'Badges': {'color': '#f6f9d4', 'isHour': True},
     'Project': {'color': '#f83dda', 'isHour': False},
@@ -26,6 +25,13 @@ SHIFT_INFO = {
     'Manager': {'color': '#ACB9CA', 'isHour': True},
     'Securager': {'color': '#00b1d2', 'isHour': True},
     'STST': {'color': '#bf94e4', 'isHour': False},
+    'South 1': {'color': '#b50934', 'isHour': False},
+    'North 1': {'color': '#fc7703', 'isHour': False},
+    'Main 1': {'color': '#fc0390', 'isHour': False},
+    'TWRO': {'color': '#e0eb4b', 'isHour': False},
+    'BERU': {'color': '#4beb5e', 'isHour': False},
+    'MAUM': {'color': '#4bebc5', 'isHour': False},
+    'WHWI': {'color': '#4bbbeb', 'isHour': False},
     'MP': {'color': '#FFA500', 'isHour': False},
     'Museum Project': {'color': '#FFA500', 'isHour': True},
     'Training': {'color': '#FFD580', 'isHour': True},
@@ -40,17 +46,9 @@ SHIFT_INFO = {
     None: {'color': '#D3D3D3', 'isHour': False},
 }
 
-# greet
-# front front
-# front back
-# MASQ beaver run flow
-# Twist n roll
-# float 1 south
-# float 1 north 
-# ENCA --> Formula fun enca
 
 STANDARD_FLOOR_SHIFTS = [
-    'Security', 'Trike', 'CORO', 'Gallery', 'Front', 'Back', 'Float 0', 'Float 1', 'ENCA', 'STST', 'TEST'
+    'Security', 'Trike', 'CORO', 'Gallery', 'WHWI', 'MAUM', 'TWRO', 'BERU', 'EL' , 'Main 1', 'South 1', 'North 1', 'ENCA', 'Front', 'Back', 'Float 1', 'Float 0', 'Greet', 'STST',
 ]
 NONSTANDARD_SHIFTS = [
     'Manager', 'GRGR', 'Project', 'MP', 'Pizza', 'Retail', 'Zoom'

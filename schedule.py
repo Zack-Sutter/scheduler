@@ -1226,7 +1226,7 @@ class StandardShiftFrame(QFrame):
         grid.addWidget(header, 0, 0)
         self.list_widget = QListWidget()
         self.list_widget.setItemDelegate(ShiftCoverageDelegate(self.list_widget))
-        self.list_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.list_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         fm = QFontMetrics(self.list_widget.font())
@@ -1245,7 +1245,8 @@ class StandardShiftFrame(QFrame):
             item.setForeground(QBrush(QColor(text_color)))
             self.list_widget.addItem(item)
         list_height = sum(
-            self.list_widget.sizeHintForRow(row) for row in range(self.list_widget.count())
+            self.list_widget.sizeHintForRow(row)
+            for row in range(min(10, self.list_widget.count()))
         )
         list_widget_height = list_height + 2 * self.list_widget.frameWidth()
         self.list_widget.setFixedHeight(list_widget_height)
