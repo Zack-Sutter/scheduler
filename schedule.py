@@ -1053,7 +1053,7 @@ class SheetFrame(QWidget):
         df = self.controller.df.copy()
         full_reset = self.model.rowCount() == 0 or self.model.columnCount() == 0
         self.model.set_dataframe(df.fillna(''), full_reset=full_reset)
-        self.table_view.set_regions([])
+        #self.table_view.set_regions([])
         self._fit_table_to_frame()
         QTimer.singleShot(0, self._fit_table_to_frame)
 
@@ -1686,7 +1686,7 @@ class ScheduleApp(QMainWindow):
         self.paid_workers_entry.setPlainText(', '.join(self.paid_workers))
         self.volunteers_entry.setPlainText(', '.join(self.volunteers))
 
-        self.sheet_frame.table_view.set_regions([])
+        #self.sheet_frame.table_view.set_regions([])
         self.update_sheet()
         return removed_shifts
 

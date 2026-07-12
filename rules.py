@@ -17,7 +17,7 @@ SHIFT_INFO = {
     'Lunch': {'color': '#7d7f7c', 'isHour': False},
     'Dinner': {'color': '#7d7f7c', 'isHour': False},
     'Security': {'color': '#00b1d2', 'isHour': True},
-    'Greet': {'color': '#f6f9d4', 'isHour': True},
+    'Greet': {'color': '#f6f9d4', 'isHour': False},
     'FLOAT': {'color': '#D3D3D3', 'isHour': False},
     'Badges': {'color': '#f6f9d4', 'isHour': True},
     'Project': {'color': '#f83dda', 'isHour': False},
@@ -40,15 +40,17 @@ SHIFT_INFO = {
     'Float 0': {'color': '#BED785', 'isHour': False},
     'Float 1': {'color': '#90E4C1', 'isHour': False},
     'CORO': {'color': '#f4b183', 'isHour': False},
-    'Pizza': {'color': '#f73939', 'isHour': True},
+    'Pizza': {'color': '#e04646', 'isHour': True},
     'Zoom': {'color': '#ffffff', 'isHour': False},
+    'BLANK hour': {'color': '#ff0000', 'isHour': True},
+    'BLANK half hour': {'color': '#ff0000', 'isHour': False},
     '': {'color': '#D3D3D3', 'isHour': False},
     None: {'color': '#D3D3D3', 'isHour': False},
 }
 
 
 STANDARD_FLOOR_SHIFTS = [
-    'Security', 'Trike', 'CORO', 'Gallery', 'WHWI', 'MAUM', 'TWRO', 'BERU', 'EL' , 'Main 1', 'South 1', 'North 1', 'ENCA', 'Front', 'Back', 'Float 1', 'Float 0', 'Greet', 'STST',
+    'Security', 'Trike', 'CORO', 'Gallery', 'WHWI', 'MAUM', 'TWRO', 'BERU', 'EL' , 'Main 1', 'South 1', 'North 1', 'ENCA', 'Front', 'Back', 'Float 1', 'Float 0', 'Greet', 'STST', 'BLANK hour', 'BLANK half hour'
 ]
 NONSTANDARD_SHIFTS = [
     'Manager', 'GRGR', 'Project', 'MP', 'Pizza', 'Retail', 'Zoom'
