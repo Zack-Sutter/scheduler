@@ -1402,6 +1402,10 @@ class ScheduleApp(QMainWindow):
 
         bottom_row = QHBoxLayout()
         bottom_row.addStretch()
+        auto_populate_btn = QPushButton('Auto Populate Summer Schedule')
+        auto_populate_btn.setObjectName('primaryBtn')
+        auto_populate_btn.clicked.connect(self.auto_populate_summer_schedule)
+        bottom_row.addWidget(auto_populate_btn)
         open_btn = QPushButton('Open Schedule in Excel')
         open_btn.setObjectName('primaryBtn')
         open_btn.clicked.connect(self.open_excel)
@@ -1738,6 +1742,53 @@ class ScheduleApp(QMainWindow):
             return
         balance_rules_dialog = BalanceRulesDialog(self, on_apply=self._apply_balance_rules)
         balance_rules_dialog.show()
+
+    def _region_for_workers(self, workers: list[str]) -> SelectionRegion | None:
+        names = [w for w in workers if w and w in self.df.columns]
+        if not names:
+            return None
+        indices = [int(self.df.columns.get_loc(w)) for w in names]
+        return SelectionRegion(0, len(self.df), min(indices), max(indices) + 1)
+
+    def auto_populate_summer_schedule(self):
+        if not self.sheet_frame.has_schedule() or self.df.empty:
+            QMessageBox.warning(
+                self,
+                'Auto Populate Error',
+                'No schedule created yet. Create a blank schedule first.',
+            )
+            return
+        self._perform_with_undo(self._auto_populate_summer_schedule)
+
+    def _auto_populate_summer_schedule(self):
+        table = self.sheet_frame.table_view
+        prior = table.selection_regions()
+        try:
+            paid_region = self._region_for_workers(self.paid_workers)
+            if paid_region is not None:
+                table.set_regions([paid_region])
+                self.add_standard_shift('Security')
+                self.auto_balance_shifts(default_balance_rules())
+            volunteer_region = self._region_for_workers(self.volunteers)
+            if volunteer_region is not None:
+                table.set_regions([volunteer_region])
+                self.add_standard_shift('BLANK hour')
+                self.add_standard_shift('Trike')
+                self.add_standard_shift('CORO')
+                self.add_standard_shift('Gallery')
+                self.add_standard_shift('WHWI')
+                self.add_standard_shift('MAUM')
+                self.add_standard_shift('TWRO')
+                self.add_standard_shift('BERU')
+                self.add_standard_shift('EL')
+                self.add_standard_shift('Main 1')
+                self.add_standard_shift('North 1')
+                self.add_standard_shift('South 1')
+                self.add_standard_shift('ENCA')
+                self.add_standard_shift('Greet')
+                self.auto_balance_shifts(default_balance_rules())
+        finally:
+            table.set_regions(prior)
 
     def _apply_balance_rules(self, rules):
         self._perform_with_undo(lambda: self.auto_balance_shifts(rules))
