@@ -164,9 +164,9 @@ class NoDirectSwapShiftsRule(ShiftBalanceRule):
                 violations += 1
         return violations
 
-class MinimizeTrikeCoro(ShiftBalanceRule):
-    name = 'minimize_trike_coro'
-    description = 'Minimize Trike/CORO shifts per person.'
+class BalanceTrikeCoro(ShiftBalanceRule):
+    name = 'balance_trike_coro'
+    description = 'Balance Trike/CORO shifts per person.'
     
     def _count(self, col_series):
         values = col_series.tolist()
@@ -178,6 +178,19 @@ class MinimizeTrikeCoro(ShiftBalanceRule):
             return 0
         return violations
 
+class BalanceGallery(ShiftBalanceRule):
+    name = 'balance_gallery'
+    description = 'Balance gallery shifts per person.'
+    
+    def _count(self, col_series):
+        values = col_series.tolist()
+        violations = 1
+        for value in values:
+            if value == 'Gallery':
+                violations *= 2
+        if violations == 1:
+            return 0
+        return violations
 
 
 
@@ -201,8 +214,9 @@ def default_balance_rules():
         NoTrikeCoroAdjacencyRule(),
         NoTrikeAdjacentLunchRule(),
         NoDirectSwapShiftsRule(),
-        MinimizeTrikeCoro(),
-        TrikeCoroBefore1pmRule()
+        BalanceTrikeCoro(),
+        TrikeCoroBefore1pmRule(),
+        BalanceGallery()
     ]
 
 
