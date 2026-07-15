@@ -95,7 +95,7 @@ subtitle_text_color = '#666666'
 text_field_color = '#c6c6c6'
 sheet_grid_line_color = '#b0b0b0'
 regular_font_family = "Georgia"
-regular_font_size = 11
+regular_font_size = 12
 
 NOTES_TAB_LABELS = ('G', 'S', 'M', 'T', 'W', 'T', 'F', 'S')
 NOTES_TAB_TOOLTIPS = (
