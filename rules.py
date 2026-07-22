@@ -56,7 +56,7 @@ NONSTANDARD_SHIFTS = [
     'Manager', 'GRGR', 'Project', 'MP', 'Pizza', 'Retail', 'Zoom'
 ]
 SWAPPABLE_FLOOR_SHIFTS = [
-    'Trike', 'CORO', 'Gallery', 'Front', 'Back', 'Float 0', 'Float 1', 'ENCA', 'STST', 'TEST'
+    'Trike', 'CORO', 'Gallery', 'Front', 'Back', 'Float 0', 'Float 1', 'ENCA', 'STST', 'Greet', 'TEST'
 ]
 DIRECT_SWAP_SHIFTS = ['Trike', 'Gallery', 'Security']
 

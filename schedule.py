@@ -1,3 +1,4 @@
+from abc import update_abstractmethods
 import copy
 import datetime
 import os
@@ -1489,15 +1490,19 @@ class ScheduleApp(QMainWindow):
         self.nonstandard_shifts.append(selection)
         self.update_sheet()
 
-    def add_standard_shift(self, shift):
+    def add_standard_shift(self, shift, *, region=None, update_sheet=True):
         if not self.sheet_frame.has_schedule():
             return
-        regions = self.sheet_frame.table_view.selection_regions()
-        if not regions:
-            workers = self.paid_workers + self.volunteers
-            start, end = 0, len(self.df)
+        if region is None:
+            regions = self.sheet_frame.table_view.selection_regions()
+            if not regions:
+                workers = self.paid_workers + self.volunteers
+                start, end = 0, len(self.df)
+            else:
+                region = regions[0]
+                workers = region.column_names(self.df)
+                start, end = region.from_row, region.upto_row
         else:
-            region = regions[0]
             workers = region.column_names(self.df)
             start, end = region.from_row, region.upto_row
 
@@ -1512,7 +1517,8 @@ class ScheduleApp(QMainWindow):
         if failed_time_slots and shift:
             msg = ', '.join(failed_time_slots)
             QMessageBox.warning(self, 'Warning', f'Failed to place {shift} at:\n{msg}')
-        self.update_sheet()
+        if update_sheet:
+            self.update_sheet()
 
     def _standard_half_hour_shift(self, shift, workers, start, end):
         failed_time_slots = []
@@ -1749,6 +1755,9 @@ class ScheduleApp(QMainWindow):
             return None
         indices = [int(self.df.columns.get_loc(w)) for w in names]
         return SelectionRegion(0, len(self.df), min(indices), max(indices) + 1)
+    
+    def _auto_populate_summer_full(self, region):
+        self.add_standard_shift('WHWI', region=region, update_sheet=False)
 
     def auto_populate_summer_schedule(self):
         if not self.sheet_frame.has_schedule() or self.df.empty:
@@ -1761,42 +1770,83 @@ class ScheduleApp(QMainWindow):
         self._perform_with_undo(self._auto_populate_summer_schedule)
 
     def _auto_populate_summer_schedule(self):
-        table = self.sheet_frame.table_view
-        prior = table.selection_regions()
-        try:
-            paid_region = self._region_for_workers(self.paid_workers)
-            if paid_region is not None:
-                table.set_regions([paid_region])
-                self.add_standard_shift('Security')
-                self.auto_balance_shifts(default_balance_rules())
-            volunteer_region = self._region_for_workers(self.volunteers)
-            if volunteer_region is not None:
-                table.set_regions([volunteer_region])
-                self.add_standard_shift('BLANK hour')
-                self.add_standard_shift('Trike')
-                self.add_standard_shift('CORO')
-                self.add_standard_shift('Gallery')
-                self.add_standard_shift('WHWI')
-                self.add_standard_shift('MAUM')
-                self.add_standard_shift('TWRO')
-                self.add_standard_shift('BERU')
-                self.add_standard_shift('EL')
-                self.add_standard_shift('Main 1')
-                self.add_standard_shift('North 1')
-                self.add_standard_shift('South 1')
-                self.add_standard_shift('ENCA')
-                self.add_standard_shift('Greet')
-                self.auto_balance_shifts(default_balance_rules())
-        finally:
-            table.set_regions(prior)
+        paid_region = self._region_for_workers(self.paid_workers)
+        if paid_region is not None:
+            self.add_standard_shift('Security', region=paid_region, update_sheet=False)
+
+        volunteer_region = self._region_for_workers(self.volunteers)
+        if volunteer_region is not None:
+            col_names = volunteer_region.column_names(self.df)
+            row_labels = self.df.index[
+                volunteer_region.from_row : volunteer_region.upto_row
+            ]
+            volunteer_block = self.df.loc[row_labels, col_names]
+            min_availability = int(volunteer_block.isna().sum(axis=1).min())
+
+            blank_hour = 'BLANK hour'
+            blank_half_hour = 'BLANK half hour'
+            while True:
+                row_avail = self.df.loc[row_labels, col_names].isna().sum(axis=1)
+                if row_avail.max() <= min_availability:
+                    break
+                filled_this_pass = False
+                for row_label in row_avail[row_avail == row_avail.max()].index:
+                    pos = self.df.index.get_loc(row_label)
+                    hour_start = self.df.index[pos - (pos % 2)]
+                    hour_end = self.df.index[pos - (pos % 2) + 1]
+                    cols_to_fill = random.sample(col_names, len(col_names))
+                    filled = False
+                    hour_start_avail = row_avail[hour_start]
+                    hour_end_avail = row_avail[hour_end]
+                    if (
+                        hour_start_avail > min_availability
+                        and hour_end_avail > min_availability
+                        and hour_start_avail == hour_end_avail
+                    ):
+                        for col_name in cols_to_fill:
+                            if (
+                                pd.isna(self.df.at[hour_start, col_name])
+                                and pd.isna(self.df.at[hour_end, col_name])
+                            ):
+                                self.df.at[hour_start, col_name] = blank_hour
+                                self.df.at[hour_end, col_name] = blank_hour
+                                filled = True
+                                break
+                    if not filled:
+                        for col_name in cols_to_fill:
+                            if pd.isna(self.df.at[row_label, col_name]):
+                                self.df.at[row_label, col_name] = blank_half_hour
+                                filled = True
+                                break
+                    if filled:
+                        filled_this_pass = True
+                        break
+                if not filled_this_pass:
+                    break
+
+            self.add_standard_shift('Trike', region=volunteer_region, update_sheet=False)
+            self.add_standard_shift('CORO', region=volunteer_region, update_sheet=False)
+            self.add_standard_shift('Gallery', region=volunteer_region, update_sheet=False)
+
+            if min_availability > 13:
+                self._auto_populate_summer_full(volunteer_region)
+
+            # threshold of volunteers available
+            # determines floor coverage
+            # 14+ full
+            # 
+            # 
+
+        self.auto_balance_shifts(default_balance_rules(), region=volunteer_region, update_sheet=False)
+        self.update_sheet()
 
     def _apply_balance_rules(self, rules):
         self._perform_with_undo(lambda: self.auto_balance_shifts(rules))
         self.toast_manager.show('rules applied', background_color=primary_button_color)
 
-    def auto_balance_shifts(self, balance_rules=None):
+    def auto_balance_shifts(self, balance_rules=None, *, region=None, update_sheet=True):
         balance_rules = balance_rules or default_balance_rules()
-        region = self._primary_sheet_region()
+        region = region or self._primary_sheet_region()
         if region is None:
             QMessageBox.warning(
                 self,
@@ -1875,7 +1925,8 @@ class ScheduleApp(QMainWindow):
                 'Could not fully resolve all conflicts. '
                 'Try running Balance again or adjust the schedule manually.',
             )
-        self.update_sheet()
+        if update_sheet:
+            self.update_sheet()
 
     def update_labels(self):
         if not self.inputs:
